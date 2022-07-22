@@ -302,40 +302,55 @@ static void nuc970_uart_update_dmabusy(NUC970UartState* s)
     }
 }
 
+/*
+The UART Controller supports seven types of interrupts including
+(1). LIN function interrupt (INT_LIN)
+(2). Buffer error interrupt (INT_BUF_ERR)
+(3). time-out interrupt (INT_TOUT)
+(4). MODEM status interrupt (INT_MODEM)
+(5). Line status interrupt (break error, parity error, framing error or RS-485 interrupt) (INT_RLS)
+(6). Receiver threshold level reaching interrupt (INT_RDA)
+(7). Transmitter FIFO empty interrupt (INT_THRE)
+*/
+
 static void nuc970_uart_update_irq(NUC970UartState* s)
 {
-    /*
-     * The Tx interrupt is always requested if the number of data in the
-     * transmit FIFO is smaller than the trigger level.
-     */
-    if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
-        uint32_t count = (s->reg[I_(UFSTAT)] & UFSTAT_Tx_FIFO_COUNT) >>
-            UFSTAT_Tx_FIFO_COUNT_SHIFT;
+    uint32_t count;
+    int RFITL[] = { 1,4,8,14,30,46,62 };
+    
+    
+        //uint32_t count = (s->reg[I_(UFSTAT)] & UFSTAT_Tx_FIFO_COUNT) >>
+        //    UFSTAT_Tx_FIFO_COUNT_SHIFT;
 
-        if (count <= nuc970_uart_Tx_FIFO_trigger_level(s)) {
-            s->reg[I_(UINTSP)] |= UINTSP_TXD;
-        }
+        //if (count <= nuc970_uart_Tx_FIFO_trigger_level(s)) {
+        //    s->reg[I_(UINTSP)] |= UINTSP_TXD;
+        //}
 
-        /*
-         * Rx interrupt if trigger level is reached or if rx timeout
-         * interrupt is disabled and there is data in the receive buffer
-         */
+
         count = fifo_elements_number(&s->rx);
-        if ((count && !(s->reg[I_(UCON)] & 0x80)) ||
-            count >= nuc970_uart_Rx_FIFO_trigger_level(s)) {
-            nuc970_uart_update_dmabusy(s);
-            s->reg[I_(UINTSP)] |= UINTSP_RXD;
-            timer_del(s->fifo_timeout_timer);
+        if (count && count >= RFITL[nuc970_uart_Rx_FIFO_trigger_level(s)]) {
+            //nuc970_uart_update_dmabusy(s);
+            s->reg[I_(UA_ISR)] |= 0x01; // RDA_IF;
+            //timer_del(s->fifo_timeout_timer);
         }
-    }
-    else if (s->reg[I_(UTRSTAT)] & UTRSTAT_Rx_BUFFER_DATA_READY) {
-        nuc970_uart_update_dmabusy(s);
-        s->reg[I_(UINTSP)] |= UINTSP_RXD;
-    }
+        else {
+            s->reg[I_(UA_ISR)] &= ~0x01; // RDA_IF;
+        }
 
-    s->reg[I_(UINTP)] = s->reg[I_(UINTSP)] & ~s->reg[I_(UINTM)];
+        if (fifo_elements_number(&s->tx) == 0) {
+            s->reg[I_(UA_ISR)] |= 0x02;
+        }
+        else {
+            s->reg[I_(UA_ISR)] &= ~0x02;
+        }
+    
+    
 
-    if (s->reg[I_(UINTP)]) {
+    //s->reg[I_(UINTP)] = s->reg[I_(UINTSP)] & ~s->reg[I_(UINTM)];
+        int interrupt = (s->reg[I_(UA_ISR)] & 0x3)  & (s->reg[I_(UA_IER)] & 0x3);
+
+    //if (s->reg[I_(UINTP)]) {
+        if (interrupt) {
         qemu_irq_raise(s->irq);
         trace_exynos_uart_irq_raised(s->channel, s->reg[I_(UINTP)]);
     }
@@ -361,18 +376,61 @@ static void nuc970_uart_timeout_int(void* opaque)
     }
 }
 
+static int get_baudrate(uint32_t value)
+{
+    /*
+    [31:30] Reserved    Reserved.
+    [29]    DIV_X_EN    Divider X Enable Control
+        0 = Divider X Disabled (the equation of M = 16).
+        1 = Divider X Enabled (the equation of M = X+1, but DIVIDER_X(UA_BAUD[27:24]) must
+            >= 8).
+        Refer to the table below for more information.
+        Note: In IrDA mode, this bit must disable.
+        Note: The BRD = Baud Rate Divider, and the baud rate equation is
+        Baud Rate = Clock / [M * (BRD + 2)]; The default value of M is 16.
+    [28]    DIV_X_ONE   Divider X Equal to 1
+        0 = Divider M = X (the equation of M = X+1, but DIVIDER_X(UA_BAUD[27:24]) must >=
+        8).
+        1 = Divider M = 1 (the equation of M = 1, but BRD(UA_BAUD[15:0]) must >= 3).
+    [27:24] DIVIDER_X   Divider X
+        The baud rate divider M = X+1.
+    [23:16] Reserved    Reserved.
+    [15:0]  BRD         Baud Rate Divider
+        The field indicated the baud rate divider
+
+     * The baud rate equation is: Baud Rate = UART_CLK / M * [BRD + 2]
+     * where M and BRD are defined in Baud Rate Divider Register (UA_BAUD).
+     *   Mode DIV_X_EN DIV_X_ONE DIVIDER X  BRD Baud Rate Equation
+     *   0    Disable  0         Don’t Care A   UART_CLK / [16 * (A+2)]
+     *   1    Enable   0         B          A   UART_CLK / [(B+1) * (A+2)] , B must >= 8
+     *   2    Enable   1         Don’t care A   UART_CLK / (A+2), A must >=9
+     */
+    uint32_t xEn = (value >> 29) & 0x1;
+    uint32_t xOne = (value >> 28) & 0x1;
+    uint32_t divX = (value >> 24) & 0xf;
+    uint32_t brd = value & 0xffff;
+    uint32_t m = 1;
+    if (!xEn)
+        m = 16;
+    else if (!xOne)
+        m = divX + 1;
+
+    int baudrate = 12000000 / (m * (brd + 2));
+    return baudrate;
+}
+
 static void nuc970_uart_update_parameters(NUC970UartState* s)
 {
     int speed, parity, data_bits, stop_bits;
     QEMUSerialSetParams ssp;
-    uint64_t uclk_rate;
+    //uint64_t uclk_rate;
 
-    if (s->reg[I_(UBRDIV)] == 0) {
+    if (s->reg[I_(UA_BAUD)] == 0) {
         return;
     }
 
-    if (s->reg[I_(ULCON)] & 0x20) {
-        if (s->reg[I_(ULCON)] & 0x28) {
+    if (s->reg[I_(UA_LCR)] & (1<<3)) {  // PBE: Parity Bit Enable Control
+        if (s->reg[I_(UA_LCR)] & (1<<4)) {  // EPE: Even Parity Enable Control
             parity = 'E';
         }
         else {
@@ -383,19 +441,20 @@ static void nuc970_uart_update_parameters(NUC970UartState* s)
         parity = 'N';
     }
 
-    if (s->reg[I_(ULCON)] & 0x4) {
+    if (s->reg[I_(UA_LCR)] & (1<<2)) {
         stop_bits = 2;
     }
     else {
         stop_bits = 1;
     }
 
-    data_bits = (s->reg[I_(ULCON)] & 0x3) + 5;
+    data_bits = (s->reg[I_(UA_LCR)] & 0x3) + 5;
 
-    uclk_rate = 24000000;
+    //uclk_rate = 24000000;
 
-    speed = uclk_rate / ((16 * (s->reg[I_(UBRDIV)]) & 0xffff) +
-        (s->reg[I_(UFRACVAL)] & 0x7) + 16);
+    //speed = uclk_rate / ((16 * (s->reg[I_(UBRDIV)]) & 0xffff) +
+    //    (s->reg[I_(UFRACVAL)] & 0x7) + 16);
+    speed = get_baudrate(s->reg[I_(UA_BAUD)]);
 
     ssp.speed = speed;
     ssp.parity = parity;
@@ -440,6 +499,7 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
     //case ULCON:
     case UBRDIV:
     case UFRACVAL:
+    case UA_BAUD:
         s->reg[I_(offset)] = val;
         nuc970_uart_update_parameters(s);
         break;
@@ -487,7 +547,6 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
     case UERSTAT:
     case UFSTAT:
     case UMSTAT:
-    case URXH:
         trace_exynos_uart_ro_write(
             s->channel, nuc970_uart_regname(offset), offset);
         break;

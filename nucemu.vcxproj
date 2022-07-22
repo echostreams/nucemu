@@ -90,11 +90,13 @@
   <ItemGroup>
     <ClCompile Include="hw\arm\nuc970.c" />
     <ClCompile Include="hw\char\nuc970_uart.c" />
+    <ClCompile Include="hw\intc\nuc970_aic.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="Makefile" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\hw\char\nuc970_uart.h" />
+    <ClInclude Include="include\hw\intc\nuc970_aic.h" />
     <ClInclude Include="test.h" />
   </ItemGroup>
   <ItemGroup>
@@ -103,6 +105,7 @@
     <None Include="hw\arm\Kconfig" />
     <None Include="hw\arm\meson.build" />
     <None Include="hw\char\meson.build" />
+    <None Include="hw\intc\meson.build" />
     <None Include="meson.build" />
     <None Include="VERSION" />
   </ItemGroup>
