@@ -1474,9 +1474,10 @@ static void nuc970_init(MachineState* machine)
     /*** UARTs ***/
     uart[0] = nuc970_uart_create(0xb8000000, 64, 0, serial_hd(0),
         qdev_get_gpio_in(aic, 36));
+    uart[1] = nuc970_uart_create(0xb8000100, 64, 1, serial_hd(1),
+        qdev_get_gpio_in(aic, 37));
 
-    nuc970_binfo.ram_size = MP_RAM_DEFAULT_SIZE;
-    arm_load_kernel(cpu, machine, &nuc970_binfo);
+    
 
     // test shadow memory region
     /*
@@ -1486,6 +1487,9 @@ static void nuc970_init(MachineState* machine)
     address_space_stl_notdirty(as, 0x3c000000, 0x01234567, MEMTXATTRS_UNSPECIFIED, NULL);
     address_space_stl_notdirty(as, 0xbc000004, 0x89abcdef, MEMTXATTRS_UNSPECIFIED, NULL);
     */
+
+    nuc970_binfo.ram_size = MP_RAM_DEFAULT_SIZE;
+    arm_load_kernel(cpu, machine, &nuc970_binfo);
 
     info_report("Loading NUC970 kernel...\n");
 }

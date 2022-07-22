@@ -1,9 +1,6 @@
 /*
  *  NUC970 UART Emulation
  *
- *  Copyright (C) 2011 Samsung Electronics Co Ltd.
- *    Maksim Kozlov, <m.kozlov@samsung.com>
- *
  *  This program is free software; you can redistribute it and/or modify it
  *  under the terms of the GNU General Public License as published by the
  *  Free Software Foundation; either version 2 of the License, or
@@ -371,7 +368,7 @@ static void nuc970_uart_timeout_int(void* opaque)
         (s->reg[I_(UCON)] & (1 << 11))) {
         s->reg[I_(UINTSP)] |= UINTSP_RXD;
         s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_TIMEOUT;
-        nuc970_uart_update_dmabusy(s);
+        //nuc970_uart_update_dmabusy(s);
         nuc970_uart_update_irq(s);
     }
 }
@@ -496,39 +493,35 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
         nuc970_uart_regname(offset), val);
 
     switch (offset) {
-    //case ULCON:
-    case UBRDIV:
-    case UFRACVAL:
+    
     case UA_BAUD:
         s->reg[I_(offset)] = val;
         nuc970_uart_update_parameters(s);
         break;
-    case UFCON:
-        s->reg[I_(UFCON)] = val;
+    case UA_FCR:
+        s->reg[I_(UA_FCR)] = val;
         if (val & UFCON_Rx_FIFO_RESET) {
             fifo_reset(&s->rx);
-            s->reg[I_(UFCON)] &= ~UFCON_Rx_FIFO_RESET;
+            s->reg[I_(UA_FCR)] &= ~UFCON_Rx_FIFO_RESET;
             trace_exynos_uart_rx_fifo_reset(s->channel);
         }
         if (val & UFCON_Tx_FIFO_RESET) {
             fifo_reset(&s->tx);
-            s->reg[I_(UFCON)] &= ~UFCON_Tx_FIFO_RESET;
+            s->reg[I_(UA_FCR)] &= ~UFCON_Tx_FIFO_RESET;
             trace_exynos_uart_tx_fifo_reset(s->channel);
         }
         break;
 
-    case 0x0:
+    case UA_THR:
         if (qemu_chr_fe_backend_connected(&s->chr)) {
-            s->reg[I_(UTRSTAT)] &= ~(UTRSTAT_TRANSMITTER_EMPTY |
-                UTRSTAT_Tx_BUFFER_EMPTY);
+            //s->reg[I_(UTRSTAT)] &= ~(UTRSTAT_TRANSMITTER_EMPTY | UTRSTAT_Tx_BUFFER_EMPTY);
             ch = (uint8_t)val;
             /* XXX this blocks entire thread. Rewrite to use
              * qemu_chr_fe_write and background I/O callbacks */
             qemu_chr_fe_write_all(&s->chr, &ch, 1);
             trace_exynos_uart_tx(s->channel, ch);
-            s->reg[I_(UTRSTAT)] |= UTRSTAT_TRANSMITTER_EMPTY |
-                UTRSTAT_Tx_BUFFER_EMPTY;
-            s->reg[I_(UINTSP)] |= UINTSP_TXD;
+            //s->reg[I_(UTRSTAT)] |= UTRSTAT_TRANSMITTER_EMPTY | UTRSTAT_Tx_BUFFER_EMPTY;
+            //s->reg[I_(UINTSP)] |= UINTSP_TXD;
             nuc970_uart_update_irq(s);
         }
         break;
@@ -550,14 +543,14 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
         trace_exynos_uart_ro_write(
             s->channel, nuc970_uart_regname(offset), offset);
         break;
-    case UINTSP:
-        s->reg[I_(UINTSP)] &= ~val;
-        break;
-    case UINTM:
-        s->reg[I_(UINTM)] = val;
-        nuc970_uart_update_irq(s);
-        break;
-    case UCON:
+    //case UINTSP:
+    //    s->reg[I_(UINTSP)] &= ~val;
+    //    break;
+    //case UINTM:
+    //    s->reg[I_(UINTM)] = val;
+    //    nuc970_uart_update_irq(s);
+    //    break;
+    case UA_IER:
     case UMCON:
     default:
         s->reg[I_(offset)] = val;
@@ -574,13 +567,13 @@ static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
     DPRINTF("read(offset=0x%" HWADDR_PRIx ")\n", offset);
 
     switch (offset) {
-    case UERSTAT: /* Read Only */
-        res = s->reg[I_(UERSTAT)];
-        s->reg[I_(UERSTAT)] = 0;
-        trace_exynos_uart_read(s->channel, offset,
-            nuc970_uart_regname(offset), res);
-        return res;
-    case UFSTAT: /* FSR */
+    //case UERSTAT: /* Read Only */
+    //    res = s->reg[I_(UERSTAT)];
+    //    s->reg[I_(UERSTAT)] = 0;
+    //    trace_exynos_uart_read(s->channel, offset,
+    //        nuc970_uart_regname(offset), res);
+    //    return res;
+    case UA_FSR: /* FSR */
         res = 0;
         {
             int tx_fill = fifo_elements_number(&s->tx);
@@ -601,14 +594,12 @@ static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
             if (fifo_empty_elements_number(&s->tx) == 0) {
                 res |= 1 << 23; // TX_FULL;
             }
-
-
         }
         trace_exynos_uart_read(s->channel, offset,
             nuc970_uart_regname(offset),
             res);
         return res;
-    case 0://URXH:
+    case UA_RBR:
         //if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
         if (1) {
             if (fifo_elements_number(&s->rx)) {
@@ -633,14 +624,14 @@ static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
             res = s->reg[I_(URXH)];
         }
         qemu_chr_fe_accept_input(&s->chr);
-        nuc970_uart_update_dmabusy(s);
+        //nuc970_uart_update_dmabusy(s);
         trace_exynos_uart_read(s->channel, offset,
             nuc970_uart_regname(offset), res);
         return res;
-    case UTXH:
-        trace_exynos_uart_wo_read(s->channel, nuc970_uart_regname(offset),
-            offset);
-        break;
+    //case UTXH:
+    //    trace_exynos_uart_wo_read(s->channel, nuc970_uart_regname(offset),
+    //        offset);
+    //    break;
     default:
         trace_exynos_uart_read(s->channel, offset,
             nuc970_uart_regname(offset),
@@ -667,7 +658,8 @@ static int nuc970_uart_can_receive(void* opaque)
 {
     NUC970UartState* s = (NUC970UartState*)opaque;
 
-    if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
+    //if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
+    if (1) {
         return fifo_empty_elements_number(&s->rx);
     }
     else {
@@ -689,12 +681,13 @@ static void nuc970_uart_receive(void* opaque, const uint8_t* buf, int size)
         for (i = 0; i < size; i++) {
             fifo_store(&s->rx, buf[i]);
         }
+        DPRINTF("receive(%0x) %d\n", buf[0], size);
         nuc970_uart_rx_timeout_set(s);
     }
     else {
         s->reg[I_(URXH)] = buf[0];
     }
-    s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_BUFFER_DATA_READY;
+    //s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_BUFFER_DATA_READY;
 
     nuc970_uart_update_irq(s);
 }

@@ -87,6 +87,10 @@
     <RemoteCleanCommandLine>make clean</RemoteCleanCommandLine>
     <NMakeIncludeSearchPath>include;target/arm;build;$(NMakeIncludeSearchPath)</NMakeIncludeSearchPath>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
+    <RemoteBuildCommandLine>cd build &amp;&amp; make qemu-system-arm</RemoteBuildCommandLine>
+    <NMakeIncludeSearchPath>include;target;build</NMakeIncludeSearchPath>
+  </PropertyGroup>
   <ItemGroup>
     <ClCompile Include="hw\arm\nuc970.c" />
     <ClCompile Include="hw\char\nuc970_uart.c" />

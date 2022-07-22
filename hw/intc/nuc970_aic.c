@@ -345,7 +345,7 @@ static void nuc970_aic_class_init(ObjectClass* klass, void* data)
 
     dc->vmsd = &vmstate_nuc970_aic;
     dc->reset = nuc970_aic_reset;
-    dc->desc = "i.MX Advanced Vector Interrupt Controller";
+    dc->desc = "NUC970 Advanced Interrupt Controller";
 }
 
 static const TypeInfo nuc970_aic_info = {
