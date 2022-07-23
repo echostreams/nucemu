@@ -773,8 +773,10 @@ static uint64_t nuc970_sys_read(void* opaque, hwaddr offset,
     unsigned size)
 {
     switch (offset) {
-    case MP_MISC_BOARD_REVISION:
-        return MP_BOARD_REVISION;
+    case 0:
+        return 0x1230D008;
+    case 4:
+        return 0x1F0007D7;
 
     default:
         return 0;
@@ -797,7 +799,7 @@ static void nuc970_sys_init(Object* obj)
     SysBusDevice* sd = SYS_BUS_DEVICE(obj);
     NUC970SysState* s = NUC970_SYS(obj);
 
-    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_sys_ops, NULL,
+    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_sys_ops, s,
         "nuc970-sys", 0x200);
     sysbus_init_mmio(sd, &s->iomem);
 }
@@ -858,6 +860,152 @@ static const TypeInfo nuc970_sdic_info = {
     .instance_init = nuc970_sdic_init,
     .instance_size = sizeof(NUC970SdicState),
 };
+
+// CLK_CTL
+#define CLK_PMCON 0x000  //R/W Power Management Control Register 0xFFFF_FF03
+#define CLK_HCLKEN 0x010 //R/W AHB Devices Clock Enable Control Register 0x0000_0527
+#define CLK_PCLKEN0 0x018 //R / W APB Devices Clock Enable Control Register 0 0x0000_0000
+#define CLK_PCLKEN1 0x01C //R / W APB Devices Clock Enable Control Register 1 0x0000_0000
+#define CLK_DIVCTL0 0x020 //R / W Clock Divider Control Register 0 0x0100_00XX
+#define CLK_DIVCTL1 0x024 //R / W Clock Divider Control Register 1 0x0000_0000
+#define CLK_DIVCTL2 0x028 //R / W Clock Divider Control Register 2 0x0000_0000
+#define CLK_DIVCTL3 0x02C //R / W Clock Divider Control Register 3 0x0000_0000
+#define CLK_DIVCTL4 0x030 //R / W Clock Divider Control Register 4 0x0000_0000
+#define CLK_DIVCTL5 0x034 //R / W Clock Divider Control Register 5 0x0000_0000
+#define CLK_DIVCTL6 0x038 //R / W Clock Divider Control Register 6 0x0000_0000
+#define CLK_DIVCTL7 0x03C //R / W Clock Divider Control Register 7 0x0000_0000
+#define CLK_DIVCTL8 0x040 //R / W Clock Divider Control Register 8 0x0000_0500
+#define CLK_DIVCTL9 0x044 //R / W Clock Divider Control Register 9 0x0000_0000
+#define CLK_APLLCON 0x060 //R / W APLL Control Register 0x1000_0015
+#define CLK_UPLLCON 0x064 //R / W UPLL Control Register 0xX000_0015
+#define CLK_PLLSTBCNTR 0x080 //R/W PLL Stable Counter and Test Clock Control Register 0x0000_1800
+
+struct NUC970ClkState {
+    SysBusDevice parent_obj;
+    MemoryRegion iomem;
+    uint32_t pmcon;
+    uint32_t hclk;
+    uint32_t pclk0;
+    uint32_t pclk1;
+    uint32_t divctl[10];
+    uint32_t apll;
+    uint32_t upll;
+    uint32_t pll;
+};
+
+#define TYPE_NUC970_CLK "nuc970-clk"
+OBJECT_DECLARE_SIMPLE_TYPE(NUC970ClkState, NUC970_CLK)
+
+static uint64_t nuc970_clk_read(void* opaque, hwaddr offset,
+    unsigned size)
+{
+    NUC970ClkState* s = (NUC970ClkState*)opaque;
+    switch (offset) {
+    case CLK_PMCON:
+        return s->pmcon;
+    case CLK_HCLKEN:
+        return s->hclk;
+    case CLK_PCLKEN0:
+        return s->pclk0;
+    case CLK_PCLKEN1:
+        return s->pclk1;
+    case CLK_DIVCTL0:
+    case CLK_DIVCTL1:
+    case CLK_DIVCTL2:
+    case CLK_DIVCTL3:
+    case CLK_DIVCTL4:
+    case CLK_DIVCTL5:
+    case CLK_DIVCTL6:
+    case CLK_DIVCTL7:
+    case CLK_DIVCTL8:
+    case CLK_DIVCTL9:
+        return s->divctl[(offset - CLK_DIVCTL0) / 4];
+    case CLK_APLLCON:
+        return s->apll;
+    case CLK_UPLLCON:
+        return s->upll;
+    case CLK_PLLSTBCNTR:
+        return s->pll;
+    default:
+        return 0;
+    }
+}
+
+static void nuc970_clk_write(void* opaque, hwaddr offset,
+    uint64_t value, unsigned size)
+{
+}
+
+static const MemoryRegionOps nuc970_clk_ops = {
+    .read = nuc970_clk_read,
+    .write = nuc970_clk_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
+static void nuc970_clk_init(Object* obj)
+{
+    SysBusDevice* sd = SYS_BUS_DEVICE(obj);
+    NUC970ClkState* s = NUC970_CLK(obj);
+
+    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_clk_ops, s,
+        "nuc970-clk", 0x100);
+    sysbus_init_mmio(sd, &s->iomem);
+
+    s->pmcon = 0xffffff03;
+    s->hclk = 0x00000527;
+    s->pclk0 = 0x00000000;
+    s->pclk1 = 0x00000000;
+    s->divctl[0] = 0x01000018;
+    s->divctl[1] = 0x00000000;
+    s->divctl[2] = 0x00000000;
+    s->divctl[3] = 0x00000100;
+    s->divctl[4] = 0x00000000;
+    s->divctl[5] = 0x00000000;
+    s->divctl[6] = 0x00000000;
+    s->divctl[7] = 0x00000000;
+    s->divctl[8] = 0x00000295;
+    s->divctl[9] = 0x0000011a;
+    s->apll = 0x50000015;
+    s->upll = 0xc0000018;
+    s->pll = 0x00001800;
+    
+
+}
+
+static const VMStateDescription nuc970_clk_vmsd = {
+    .name = "nuc970_clk",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(pmcon, NUC970ClkState),
+        VMSTATE_UINT32(hclk, NUC970ClkState),
+        VMSTATE_UINT32(pclk0, NUC970ClkState),
+        VMSTATE_UINT32(pclk1, NUC970ClkState),
+        VMSTATE_UINT32_ARRAY(divctl, NUC970ClkState, 10),
+        VMSTATE_UINT32(apll, NUC970ClkState),
+        VMSTATE_UINT32(upll, NUC970ClkState),
+        VMSTATE_UINT32(pll, NUC970ClkState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static void nuc970_clk_class_init(ObjectClass* klass, void* data)
+{
+    DeviceClass* dc = DEVICE_CLASS(klass);
+
+    dc->vmsd = &nuc970_clk_vmsd;
+}
+
+static const TypeInfo nuc970_clk_info = {
+    .name = TYPE_NUC970_CLK,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_init = nuc970_clk_init,
+    .instance_size = sizeof(NUC970ClkState),
+    .class_init = nuc970_clk_class_init,
+};
+
+
+
 
 //////////////////
 
@@ -1469,6 +1617,7 @@ static void nuc970_init(MachineState* machine)
 #endif
 
     sysbus_create_simple(TYPE_NUC970_SYS,  0xb0000000, NULL);
+    sysbus_create_simple(TYPE_NUC970_CLK,  0xb0000200, NULL);
     sysbus_create_simple(TYPE_NUC970_SDIC, 0xb0001800, NULL);
     
     /*** UARTs ***/
@@ -1487,6 +1636,23 @@ static void nuc970_init(MachineState* machine)
     address_space_stl_notdirty(as, 0x3c000000, 0x01234567, MEMTXATTRS_UNSPECIFIED, NULL);
     address_space_stl_notdirty(as, 0xbc000004, 0x89abcdef, MEMTXATTRS_UNSPECIFIED, NULL);
     */
+
+    /* If the user specified a "firmware" image (e.g. UEFI), we put it to 0 and bypass
+     * the normal Linux boot process. 
+     */
+    if (machine->firmware) {
+        hwaddr firmware_addr = 0x0;
+        /* load the firmware image */
+        int r = load_image_targphys(machine->firmware, firmware_addr,
+            MP_RAM_DEFAULT_SIZE - firmware_addr);
+        if (r < 0) {
+            error_report("Failed to load firmware from %s", machine->firmware);
+            exit(1);
+        }
+
+        nuc970_binfo.entry = firmware_addr;
+        nuc970_binfo.firmware_loaded = true;
+    }
 
     nuc970_binfo.ram_size = MP_RAM_DEFAULT_SIZE;
     arm_load_kernel(cpu, machine, &nuc970_binfo);
@@ -1532,6 +1698,7 @@ static void nuc970_register_types(void)
     type_register_static(&nuc970_misc_info);
     type_register_static(&nuc970_sys_info);
     type_register_static(&nuc970_sdic_info);
+    type_register_static(&nuc970_clk_info);
 }
 
 type_init(nuc970_register_types)

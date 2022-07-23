@@ -94,8 +94,7 @@ static void nuc970_aic_set_irq(void* opaque, int irq, int level)
         s->pending |= (1ULL << irq);
     }
     else {
-        DPRINTF("Clearing IRQ %d, prio %d\n",
-            irq, nuc970_aic_prio(s, irq));
+        //DPRINTF("Clearing IRQ %d, prio %d\n", irq, nuc970_aic_prio(s, irq));
         s->pending &= ~(1ULL << irq);
     }
 

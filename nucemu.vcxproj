@@ -97,6 +97,7 @@
     <ClCompile Include="hw\intc\nuc970_aic.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="Makefile" />
+    <ClCompile Include="tests\qtest\boot-serial-test.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\hw\char\nuc970_uart.h" />
