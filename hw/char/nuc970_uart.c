@@ -238,8 +238,8 @@ static void fifo_reset(NUC970UartFIFO* q)
  * 1/2/4/6/8/10 High-speed
  */
 
-int FCR_HIGH_TRI_LEV[16] = { 1, 4, 8, 14, 30, 46, 62, 62,62,62,62,62,62,62,62,62 };
-int FCR_NORM_TRI_LEV[16] = { 1, 4, 8, 14, 14, 14, 14, 14,14,14,14,14,14,14,14,14 };
+int FCR_HIGH_TRI_LEV[16] = { 1, 4, 8, 14, 30, 46, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62 };
+int FCR_NORM_TRI_LEV[16] = { 1, 4, 8, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14 };
 
 static uint32_t nuc970_uart_FIFO_trigger_level(uint32_t channel,
     uint32_t reg)
@@ -348,7 +348,7 @@ static void nuc970_uart_update_irq(NUC970UartState* s)
     //s->reg[I_(UINTP)] = s->reg[I_(UINTSP)] & ~s->reg[I_(UINTM)];
         int interrupt = (s->reg[I_(UA_ISR)] & 0x3)  & (s->reg[I_(UA_IER)] & 0x3);
 
-        fprintf(stderr, " uart[%d] interrupt: %x (%x & %x)\n", s->channel, interrupt, s->reg[I_(UA_ISR)], s->reg[I_(UA_IER)]);
+        DPRINTF(" uart[%d] interrupt: %x (%x & %x)\n", s->channel, interrupt, s->reg[I_(UA_ISR)], s->reg[I_(UA_IER)]);
 
     //if (s->reg[I_(UINTP)]) {
         if (interrupt) {
@@ -521,7 +521,7 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
     
         if (s->channel == 1) {
             bool connected = qemu_chr_fe_backend_connected(&s->chr);
-            fprintf(stderr, " uart[%d] backend_connected: %d\n", connected);
+            DPRINTF(" uart[%d] backend_connected: %d\n", connected);
         }    
 
         if (qemu_chr_fe_backend_connected(&s->chr)) {
@@ -577,9 +577,7 @@ static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
     unsigned size)
 {
     NUC970UartState* s = (NUC970UartState*)opaque;
-    uint32_t res;
-
-    
+    uint32_t res;    
 
     switch (offset) {
     //case UERSTAT: /* Read Only */
@@ -730,7 +728,7 @@ static void nuc970_uart_reset(DeviceState* dev)
 {
     NUC970UartState* s = NUC970_UART(dev);
     int i;
-    fprintf(stderr, "*** uart_reset ***\n");
+    //fprintf(stderr, "*** uart_reset ***\n");
     for (i = 0; i < ARRAY_SIZE(nuc970_uart_regs); i++) {
         s->reg[I_(nuc970_uart_regs[i].offset)] =
             nuc970_uart_regs[i].reset_value;

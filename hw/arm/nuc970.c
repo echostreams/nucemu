@@ -1637,7 +1637,7 @@ static void nuc970_init(MachineState* machine)
     address_space_stl_notdirty(as, 0xbc000004, 0x89abcdef, MEMTXATTRS_UNSPECIFIED, NULL);
     */
 
-    /* If the user specified a "firmware" image (e.g. UEFI), we put it to 0 and bypass
+    /* If the user specified a -bios image, we put it to 0 and bypass
      * the normal Linux boot process. 
      */
     if (machine->firmware) {
