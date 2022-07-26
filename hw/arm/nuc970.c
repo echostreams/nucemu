@@ -51,7 +51,7 @@
 #define MP_UART1_BASE           0x8000C840
 #define MP_UART2_BASE           0x8000C940
 
-#define MP_GPIO_BASE            0x8000D000
+#define MP_GPIO_BASE            0xb8003000
 #define MP_GPIO_SIZE            0x00001000
 
 #define MP_FLASHCFG_BASE        0x90006000
@@ -81,8 +81,8 @@
 #define MP_EHCI_IRQ             8
 #define MP_ETH_IRQ              9
 #define MP_UART_SHARED_IRQ      11
-#define MP_GPIO_IRQ             12
-#define MP_RTC_IRQ              28
+#define MP_GPIO_IRQ             57
+#define MP_RTC_IRQ              15
 #define MP_AUDIO_IRQ            30
 
  /* Wolfson 8750 I2C address */
@@ -766,6 +766,12 @@ static const TypeInfo nuc970_misc_info = {
 struct NUC970SysState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
+    uint32_t pdid;      // 00
+    uint32_t pwron;     // 04
+    uint32_t lvrdcr;    // 20
+    
+    uint32_t apbiprst0; // 64
+    uint32_t apbiprst1; // 68
 };
 
 #define TYPE_NUC970_SYS "nuc970-sys"
@@ -774,12 +780,17 @@ OBJECT_DECLARE_SIMPLE_TYPE(NUC970SysState, NUC970_SYS)
 static uint64_t nuc970_sys_read(void* opaque, hwaddr offset,
     unsigned size)
 {
+    NUC970SysState* s = (NUC970SysState*)opaque;
+    fprintf(stderr, "sys_read(offset=%lx)\n", offset);
     switch (offset) {
     case 0:
         return 0x1230D008;
     case 4:
         return 0x1F0007D7;
-
+    case 0x68:    // APBIPRST1
+        return s->apbiprst1;
+    case 0x1fc:
+        return 0x00000001;
     default:
         return 0;
     }
@@ -788,6 +799,15 @@ static uint64_t nuc970_sys_read(void* opaque, hwaddr offset,
 static void nuc970_sys_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
+    NUC970SysState* s = (NUC970SysState*)opaque;
+    switch (offset)
+    {
+    case 0x68:
+        s->apbiprst1 = value;
+        break;
+    default:
+        break;
+    }
 }
 
 static const MemoryRegionOps nuc970_sys_ops = {
@@ -804,6 +824,7 @@ static void nuc970_sys_init(Object* obj)
     memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_sys_ops, s,
         "nuc970-sys", 0x200);
     sysbus_init_mmio(sd, &s->iomem);
+    s->apbiprst1 = 0xffffffff;
 }
 
 static const TypeInfo nuc970_sys_info = {
@@ -1076,20 +1097,40 @@ static void mv88w8618_wlan_realize(DeviceState* dev, Error** errp)
 #define TYPE_NUC970_GPIO "nuc970_gpio"
 OBJECT_DECLARE_SIMPLE_TYPE(nuc970_gpio_state, NUC970_GPIO)
 
+struct nuc970_gpio_group
+{
+    uint16_t dir;       // 00
+    uint16_t dataout;   // 04
+    uint16_t datain;    // 08
+    uint16_t imd;       // 0c
+    uint16_t iren;      // 10
+    uint16_t ifen;      // 14
+    uint16_t isr;       // 18
+    uint16_t dben;      // 1c
+    uint16_t puen;      // 20
+    uint16_t pden;      // 24
+    uint16_t icen;      // 28
+    uint16_t isen;      // 2c
+};
+
 struct nuc970_gpio_state {
     /*< private >*/
     SysBusDevice parent_obj;
     /*< public >*/
 
     MemoryRegion iomem;
+
     uint32_t lcd_brightness;
     uint32_t out_state;
     uint32_t in_state;
     uint32_t ier;
     uint32_t imr;
     uint32_t isr;
+    
     qemu_irq irq;
-    qemu_irq out[5]; /* 3 brightness out + 2 lcd (data and clock ) */
+    qemu_irq out[5];
+
+    uint16_t regs[256]; /* GPIOA - GPIOJ */
 };
 
 static void nuc970_gpio_brightness_update(nuc970_gpio_state* s) {
@@ -1159,37 +1200,12 @@ static uint64_t nuc970_gpio_read(void* opaque, hwaddr offset,
 {
     nuc970_gpio_state* s = opaque;
 
-    switch (offset) {
-    case MP_GPIO_OE_HI: /* used for LCD brightness control */
-        return s->lcd_brightness & MP_OE_LCD_BRIGHTNESS;
+    //int group = offset / 0x40;
+    //int idx = offset % 0x40;
 
-    case MP_GPIO_OUT_LO:
-        return s->out_state & 0xFFFF;
-    case MP_GPIO_OUT_HI:
-        return s->out_state >> 16;
-
-    case MP_GPIO_IN_LO:
-        return s->in_state & 0xFFFF;
-    case MP_GPIO_IN_HI:
-        return s->in_state >> 16;
-
-    case MP_GPIO_IER_LO:
-        return s->ier & 0xFFFF;
-    case MP_GPIO_IER_HI:
-        return s->ier >> 16;
-
-    case MP_GPIO_IMR_LO:
-        return s->imr & 0xFFFF;
-    case MP_GPIO_IMR_HI:
-        return s->imr >> 16;
-
-    case MP_GPIO_ISR_LO:
-        return s->isr & 0xFFFF;
-    case MP_GPIO_ISR_HI:
-        return s->isr >> 16;
-
+    switch (offset) {   
     default:
-        return 0;
+        return s->regs[offset / 4];
     }
 }
 
@@ -1198,36 +1214,8 @@ static void nuc970_gpio_write(void* opaque, hwaddr offset,
 {
     nuc970_gpio_state* s = opaque;
     switch (offset) {
-    case MP_GPIO_OE_HI: /* used for LCD brightness control */
-        s->lcd_brightness = (s->lcd_brightness & MP_GPIO_LCD_BRIGHTNESS) |
-            (value & MP_OE_LCD_BRIGHTNESS);
-        nuc970_gpio_brightness_update(s);
-        break;
-
-    case MP_GPIO_OUT_LO:
-        s->out_state = (s->out_state & 0xFFFF0000) | (value & 0xFFFF);
-        break;
-    case MP_GPIO_OUT_HI:
-        s->out_state = (s->out_state & 0xFFFF) | (value << 16);
-        s->lcd_brightness = (s->lcd_brightness & 0xFFFF) |
-            (s->out_state & MP_GPIO_LCD_BRIGHTNESS);
-        nuc970_gpio_brightness_update(s);
-        qemu_set_irq(s->out[3], (s->out_state >> MP_GPIO_I2C_DATA_BIT) & 1);
-        qemu_set_irq(s->out[4], (s->out_state >> MP_GPIO_I2C_CLOCK_BIT) & 1);
-        break;
-
-    case MP_GPIO_IER_LO:
-        s->ier = (s->ier & 0xFFFF0000) | (value & 0xFFFF);
-        break;
-    case MP_GPIO_IER_HI:
-        s->ier = (s->ier & 0xFFFF) | (value << 16);
-        break;
-
-    case MP_GPIO_IMR_LO:
-        s->imr = (s->imr & 0xFFFF0000) | (value & 0xFFFF);
-        break;
-    case MP_GPIO_IMR_HI:
-        s->imr = (s->imr & 0xFFFF) | (value << 16);
+    default:
+        s->regs[offset / 4] = value & 0xffff;
         break;
     }
 }
@@ -1240,6 +1228,7 @@ static const MemoryRegionOps nuc970_gpio_ops = {
 
 static void nuc970_gpio_reset(DeviceState* d)
 {
+    int i;
     nuc970_gpio_state* s = NUC970_GPIO(d);
 
     s->lcd_brightness = 0;
@@ -1248,6 +1237,13 @@ static void nuc970_gpio_reset(DeviceState* d)
     s->ier = 0;
     s->imr = 0;
     s->isr = 0;
+    memset(s->regs, 0, sizeof s->regs);
+
+    s->regs[0x3f0 / 4] = 0x0020;
+    for (i = 0; i < 10; i++) {
+        s->regs[i * 0x10 + 10] = 0xffff;    // ICEN
+    }
+    
 }
 
 static void nuc970_gpio_init(Object* obj)
@@ -1272,12 +1268,7 @@ static const VMStateDescription nuc970_gpio_vmsd = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32(lcd_brightness, nuc970_gpio_state),
-        VMSTATE_UINT32(out_state, nuc970_gpio_state),
-        VMSTATE_UINT32(in_state, nuc970_gpio_state),
-        VMSTATE_UINT32(ier, nuc970_gpio_state),
-        VMSTATE_UINT32(imr, nuc970_gpio_state),
-        VMSTATE_UINT32(isr, nuc970_gpio_state),
+        VMSTATE_UINT16_ARRAY(regs, nuc970_gpio_state, 256),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -1601,9 +1592,12 @@ static void nuc970_init(MachineState* machine)
     sysbus_create_simple("nuc970_wlan", MP_WLAN_BASE, NULL);
 
     sysbus_create_simple(TYPE_NUC970_MISC, MP_MISC_BASE, NULL);
+#endif
+
 
     dev = sysbus_create_simple(TYPE_NUC970_GPIO, MP_GPIO_BASE,
-        qdev_get_gpio_in(pic, MP_GPIO_IRQ));
+        qdev_get_gpio_in(aic, MP_GPIO_IRQ));
+#if 0
     i2c_dev = sysbus_create_simple("gpio_i2c", -1, NULL);
     i2c = (I2CBus*)qdev_get_child_bus(i2c_dev, "i2c");
 
@@ -1645,10 +1639,12 @@ static void nuc970_init(MachineState* machine)
     {
         //dev = qdev_new(TYPE_NPCM7XX_TIMER);
         for (i = 0; i < ARRAY_SIZE(tmr); i++) {
-            object_initialize_child(OBJECT(machine), "tmr[*]", &tmr[i], TYPE_NPCM7XX_TIMER);
+            //object_initialize_child(OBJECT(machine), "tmr[*]", &tmr[i], TYPE_NPCM7XX_TIMER);
 
-            SysBusDevice* sbd = SYS_BUS_DEVICE(&tmr[i]);
-            int first_irq;
+            dev = qdev_new(TYPE_NPCM7XX_TIMER);
+
+            SysBusDevice* sbd = SYS_BUS_DEVICE(dev);
+            //int first_irq;
             int j;
 
             /* Connect the timer clock. */
