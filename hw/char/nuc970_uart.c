@@ -261,7 +261,7 @@ static uint32_t nuc970_uart_FIFO_trigger_level(uint32_t channel,
         return FCR_HIGH_TRI_LEV[reg];       
     }
 }
-
+/*
 static uint32_t
 nuc970_uart_Tx_FIFO_trigger_level(const NUC970UartState* s)
 {
@@ -272,7 +272,7 @@ nuc970_uart_Tx_FIFO_trigger_level(const NUC970UartState* s)
 
     return nuc970_uart_FIFO_trigger_level(s->channel, reg);
 }
-
+*/
 static uint32_t
 nuc970_uart_Rx_FIFO_trigger_level(const NUC970UartState* s)
 {
@@ -288,6 +288,7 @@ nuc970_uart_Rx_FIFO_trigger_level(const NUC970UartState* s)
  * Update Rx DMA busy signal if Rx DMA is enabled. For simplicity,
  * mark DMA as busy if DMA is enabled and the receive buffer is empty.
  */
+/*
 static void nuc970_uart_update_dmabusy(NUC970UartState* s)
 {
     bool rx_dma_enabled = (s->reg[I_(UCON)] & 0x03) == 0x02;
@@ -302,7 +303,7 @@ static void nuc970_uart_update_dmabusy(NUC970UartState* s)
         trace_exynos_uart_dmaready(s->channel);
     }
 }
-
+*/
 /*
 The UART Controller supports seven types of interrupts including
 (1). LIN function interrupt (INT_LIN)
@@ -521,7 +522,7 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
     
         if (s->channel == 1) {
             bool connected = qemu_chr_fe_backend_connected(&s->chr);
-            DPRINTF(" uart[%d] backend_connected: %d\n", connected);
+            DPRINTF(" uart[%d] backend_connected: %d\n", s->channel, connected);
         }    
 
         if (qemu_chr_fe_backend_connected(&s->chr)) {
@@ -562,7 +563,7 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
     //    nuc970_uart_update_irq(s);
     //    break;
     case UA_IER:
-        fprintf(stderr, "\033[0;32m UA_IER[%d]: %08x\033[0m\n", s->channel, val);
+        fprintf(stderr, "\033[0;32m UA_IER[%d]: %" PRIx64 "\033[0m\n", s->channel, val);
         s->reg[I_(offset)] = val;
         // need to update irq
         nuc970_uart_update_irq(s);

@@ -1,10 +1,7 @@
 /*
  * NUC970 Advanced Interrupt Controller
  * 
- * This code is licensed under the GPL version 2 or later.  See
- * the COPYING file in the top-level directory.
- *
- * TODO: implement vectors.
+ * 
  */
 
 #include "qemu/osdep.h"
@@ -31,13 +28,10 @@ static const VMStateDescription vmstate_nuc970_aic = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT64(pending, NUC970AicState),
+        VMSTATE_UINT64(raw_status, NUC970AicState),
         VMSTATE_UINT64(enabled, NUC970AicState),
         VMSTATE_UINT64(is_fiq, NUC970AicState),
-        VMSTATE_UINT32(intcntl, NUC970AicState),
-        VMSTATE_UINT32(intmask, NUC970AicState),
-        VMSTATE_UINT32_ARRAY(prio, NUC970AicState, PRIO_WORDS),
-        VMSTATE_UINT64(current, NUC970AicState),
+        VMSTATE_UINT32_ARRAY(scr, NUC970AicState, 16),
         VMSTATE_END_OF_LIST()
     },
 };
@@ -51,25 +45,52 @@ static inline int nuc970_aic_prio(NUC970AicState* s, int irq)
     return nIntLevel;
 }
 
+static int nuc970_aic_get_irq(NUC970AicState* s) {
+    /*
+     * This returns the highest priority
+     * outstanding interrupt.  Where there is more than
+     * one pending IRQ with the same priority,
+     * take the lowest numbered one.
+     */
+    uint64_t flags = s->raw_status & s->enabled & ~s->is_fiq;
+    int i;
+    int prio = IRQ_LEVEL_7 + 1;
+    int irq = 0;
+    for (i = 1; i <= NUC970_AIC_NUM_IRQS; i++) {
+        if (flags & (1ULL << i)) {
+            int irq_prio = nuc970_aic_prio(s, i);
+            if (irq_prio < prio) {
+                irq = i;
+                prio = irq_prio;
+            }
+        }
+    }
+    DPRINTF("get irq(raw_status=%" HWADDR_PRIx ", enabled=%" HWADDR_PRIx ", is_fiq=%" HWADDR_PRIx ")\n",
+        s->raw_status, s->enabled, s->is_fiq);
+    return irq;
+}
+
 /* Update interrupts.  */
 static void nuc970_aic_update(NUC970AicState* s)
 {
     int i;
-    uint64_t new = s->pending & s->enabled;
+    uint64_t new = s->raw_status & s->enabled;
     uint64_t flags;
 
-    DPRINTF("update irq(pending=%" HWADDR_PRIx ", current=%" HWADDR_PRIx ", enabled=%" HWADDR_PRIx ", is_fiq=%" HWADDR_PRIx ")\n",
-        s->pending, s->current, s->enabled, s->is_fiq);
+    DPRINTF("update irq(raw_status=%" HWADDR_PRIx ", enabled=%" HWADDR_PRIx ", is_fiq=%" HWADDR_PRIx ")\n",
+        s->raw_status, s->enabled, s->is_fiq);
 
     flags = new & s->is_fiq;
     qemu_set_irq(s->fiq, !!flags);
-    if (flags)
+    if (flags) {
         s->oisr |= 1;
+
+    }
     else
         s->oisr &= ~1;
 
     flags = new & ~s->is_fiq;
-    if (!flags/* || (s->intmask == 0x1f)*/) {
+    if (!flags) {
         s->oisr &= ~(1 << 1);
         qemu_set_irq(s->irq, !!flags);
         return;
@@ -79,6 +100,7 @@ static void nuc970_aic_update(NUC970AicState* s)
      * Take interrupt if there's a pending interrupt with
      * priority higher than the value of intmask
      */
+/*
     for (i = 1; i < NUC970_AIC_NUM_IRQS + 1; i++) {
         if (flags & (1UL << i)) {
             //if (nuc970_aic_prio(s, i) > s->intmask) {
@@ -92,6 +114,23 @@ static void nuc970_aic_update(NUC970AicState* s)
     }
     s->oisr &= ~(1 << 1);
     qemu_set_irq(s->irq, 0);
+*/
+    int irq = nuc970_aic_get_irq(s);
+    if (irq > 0)
+    {
+        if (!s->vector) {
+            s->vector = irq;
+            s->oisr |= 1 << 1;
+            DPRINTF("set IRQ %d\n", i);
+            qemu_set_irq(s->irq, 1);
+        }
+        else {
+            DPRINTF("\033[0;33m nested IRQ: vector=%d irq=%d \033[0m\n", s->vector, irq);
+        }
+    } else {
+        s->oisr &= ~(1 << 1);
+        qemu_set_irq(s->irq, 0);
+    }
     
 }
 
@@ -100,46 +139,18 @@ static void nuc970_aic_set_irq(void* opaque, int irq, int level)
     NUC970AicState* s = (NUC970AicState*)opaque;
 
     if (level) {
-        DPRINTF("Raising IRQ %d, prio %d\n",
-            irq, nuc970_aic_prio(s, irq));
-        s->pending |= (1ULL << irq);
+        DPRINTF("Raising IRQ %d, prio %d\n", irq, nuc970_aic_prio(s, irq));
+        s->raw_status |= (1ULL << irq);
     }
     else {
         //DPRINTF("Clearing IRQ %d, prio %d\n", irq, nuc970_aic_prio(s, irq));
-        s->pending &= ~(1ULL << irq);
+        s->raw_status &= ~(1ULL << irq);
     }
 
     nuc970_aic_update(s);
 }
 
-static int nuc970_aic_get_irq(NUC970AicState* s) {
-    /*
-     * This returns the highest priority
-     * outstanding interrupt.  Where there is more than
-     * one pending IRQ with the same priority,
-     * take the highest numbered one.
-     */
-    uint64_t flags = s->current & s->enabled & ~s->is_fiq;
-    int i;
-    int prio = 7;
-    int irq = 0;
-    for (i = 1; i <= NUC970_AIC_NUM_IRQS; i++) {
-        if (flags & (1ULL << i)) {
-            /*
-            int irq_prio = nuc970_aic_prio(s, i);
-            if (irq_prio < prio) {
-                irq = i;
-                prio = irq_prio;
-            }
-            */
-            irq = i;
-            return irq;
-        }
-    }
-    DPRINTF("get irq(pending=%" HWADDR_PRIx ", current=%" HWADDR_PRIx ", enabled=%" HWADDR_PRIx ", is_fiq=%" HWADDR_PRIx ")\n",
-        s->pending, s->current, s->enabled, s->is_fiq);
-    return irq;
-}
+
 
 static uint64_t nuc970_aic_read(void* opaque,
     hwaddr offset, unsigned size)
@@ -168,21 +179,25 @@ static uint64_t nuc970_aic_read(void* opaque,
         return s->scr[(offset >> 2)];
 
     case 0x100/4:   // Interrupt Raw Status
-        return s->pending & 0xffffffffULL;
+        return s->raw_status & 0xffffffffULL;
     case 0x104/4:   // Interrupt Raw Status (High)
-        return s->pending >> 32;
+        return s->raw_status >> 32;
     case 0x108/4:   // Interrupt Active Status Register
-        return s->current & 0xffffffffULL;
+        return s->raw_status & 0xffffffffULL;
     case 0x10c/4:   // Interrupt Active Status Register (High)
-        return s->current >> 32;
+        return s->raw_status >> 32;
     case 0x110/4:   // Interrupt Status Register
-        return (s->current & s->enabled) & 0xffffffffULL;
+        return (s->raw_status & s->enabled) & 0xffffffffULL;
     case 0x114/4:   // Interrupt Status Register (High)
-        return (s->current & s->enabled) >> 32;
+        return (s->raw_status & s->enabled) >> 32;
     case 0x118/4:   // IPER
-        return nuc970_aic_get_irq(s) << 2;
+        if (s->vector) {
+            qemu_set_irq(s->irq, 0);
+            return s->vector << 2;
+        }
+        return 0;
     case 0x120/4:
-        return nuc970_aic_get_irq(s);
+        return s->vector;
     case 0x124/4:   // Output Interrupt Status Register
         return s->oisr;
     case 0x128/4:
@@ -239,9 +254,8 @@ static void nuc970_aic_write(void* opaque, hwaddr offset,
         break;
     case 0x150/4:
     {
-        int irq = nuc970_aic_get_irq(s);
-        if (irq > 0)
-            s->current &= ~(1 << irq);
+        if (s->vector)
+            s->vector = 0;
     }
         break;
     default:
@@ -261,19 +275,17 @@ static void nuc970_aic_reset(DeviceState* dev)
 {
     NUC970AicState* s = NUC970_AIC(dev);
 
-    s->pending = 0;
+    s->raw_status = 0;
     s->enabled = 0;
     s->is_fiq = 0;
-    s->intmask = 0x1f;
-    s->intcntl = 0;
-    s->current = 0;
+    s->vector = 0;
     s->oisr = 0;
-    memset(s->prio, 0, sizeof s->prio);
     memset(s->scr, 0, sizeof s->scr);
     for (int i = 1; i <= NUC970_AIC_NUM_IRQS; i++) {
         int idx = i / 4;
         int shift = (i % 4) * 8;
         s->scr[idx] |= (IRQ_LEVEL_7 | HIGH_LEVEL_SENSITIVE) << shift;
+        s->scr_type |= 1 << i;
     }
 }
 

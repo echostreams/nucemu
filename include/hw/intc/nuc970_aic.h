@@ -94,18 +94,21 @@ struct NUC970AicState {
 
     /*< public >*/
     MemoryRegion iomem;
-    uint64_t pending;   /* IRSR: the intrinsic state within each interrupt channel. */
-    uint64_t enabled;   /* IMR: Interrupt Mask Register */
-    uint64_t is_fiq;
-    uint32_t intcntl;
-    uint32_t intmask;
-    qemu_irq irq;
-    qemu_irq fiq;
-    uint32_t prio[PRIO_WORDS]; /* Priorities are 4-bits each */
+    uint64_t raw_status; /* IRSR: the intrinsic state within each interrupt channel. */
+    uint64_t scr_type;   /* 1=high 0=low */
+    uint64_t level_sensitive;   /* 1=level sensitive, 0=edge trigger */
+    uint64_t enabled;    /* IMR: Interrupt Mask Register */
+    uint64_t is_fiq;    /* promoted to fiq */
 
-    uint64_t current;
+    uint8_t vector;     /* represents the interrupt channel number that is 
+                        active, enabled, and has the highest priority. */
+
     uint8_t  oisr;      /* Output Interrupt Status Register */
     uint32_t scr[16];   /* Source Control Register 1...16 */
+
+    qemu_irq irq;
+    qemu_irq fiq;
+    
 };
 
 #endif /* IMX_AVIC_H */
