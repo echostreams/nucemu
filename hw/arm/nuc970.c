@@ -22,6 +22,7 @@
 #include "qemu/timer.h"
 #include "hw/ptimer.h"
 #include "hw/qdev-properties.h"
+#include "hw/qdev-clock.h"
 #include "hw/block/flash.h"
 #include "ui/console.h"
 #include "hw/i2c/i2c.h"
@@ -37,6 +38,7 @@
 #include "hw/net/mv88w8618_eth.h"
 #include "hw/char/nuc970_uart.h"
 #include "hw/intc/nuc970_aic.h"
+#include "hw/timer/nuc970_timer.h"
 
 #define MP_MISC_BASE            0x80002000
 #define MP_MISC_SIZE            0x00001000
@@ -1461,6 +1463,24 @@ static struct arm_boot_info nuc970_binfo = {
     .board_id = 0x20e,
 };
 
+/* Register base address for each Timer Module */
+static const hwaddr nuc970_tim_addr[] = {
+    0xB8001000,
+    0xB8001010,
+    0xB8001020,
+    0xB8001030,
+    0xB8001040
+};
+
+/* Register base address for each Timer Module */
+static const int nuc970_tim_irq[] = {
+    16,
+    17,
+    30,
+    31,
+    32
+};
+
 #define INIT_SHADOW_REGION 1
 
 static void nuc970_init(MachineState* machine)
@@ -1473,7 +1493,9 @@ static void nuc970_init(MachineState* machine)
     DeviceState* i2c_dev;
     DeviceState* lcd_dev;
     DeviceState* key_dev;
-    DeviceState* uart[2];   
+    DeviceState* uart[2];
+    NPCM7xxTimerCtrlState tmr[1];
+
     I2CSlave* wm8750_dev;
     SysBusDevice* s;
     I2CBus* i2c;
@@ -1619,6 +1641,33 @@ static void nuc970_init(MachineState* machine)
     sysbus_create_simple(TYPE_NUC970_SYS,  0xb0000000, NULL);
     sysbus_create_simple(TYPE_NUC970_CLK,  0xb0000200, NULL);
     sysbus_create_simple(TYPE_NUC970_SDIC, 0xb0001800, NULL);
+
+    {
+        //dev = qdev_new(TYPE_NPCM7XX_TIMER);
+        for (i = 0; i < ARRAY_SIZE(tmr); i++) {
+            object_initialize_child(OBJECT(machine), "tmr[*]", &tmr[i], TYPE_NPCM7XX_TIMER);
+
+            SysBusDevice* sbd = SYS_BUS_DEVICE(&tmr[i]);
+            int first_irq;
+            int j;
+
+            /* Connect the timer clock. */
+            //qdev_connect_clock_in(DEVICE(&tmr[i]), "clock", qdev_get_clock_out(
+            //    DEVICE(&s->clk), "timer-clock"));
+
+            sysbus_realize(sbd, &error_abort);
+            sysbus_mmio_map(sbd, 0, nuc970_tim_addr[i]);
+
+            for (j = 0; j < NPCM7XX_TIMERS_PER_CTRL; j++) {
+                //qemu_irq irq = npcm7xx_irq(s, first_irq + j);
+                //sysbus_connect_irq(sbd, j, irq);
+                sysbus_connect_irq(sbd, j, qdev_get_gpio_in(aic, nuc970_tim_irq[j]));
+            }
+            
+
+            
+        }
+    }
     
     /*** UARTs ***/
     uart[0] = nuc970_uart_create(0xb8000000, 64, 0, serial_hd(0),
