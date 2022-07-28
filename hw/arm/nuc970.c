@@ -781,25 +781,33 @@ static uint64_t nuc970_sys_read(void* opaque, hwaddr offset,
     unsigned size)
 {
     NUC970SysState* s = (NUC970SysState*)opaque;
-    fprintf(stderr, "sys_read(offset=%lx)\n", offset);
+    uint32_t r = 0;
     switch (offset) {
     case 0:
-        return 0x1230D008;
+        r = 0x1230D008;
+        break;
     case 4:
-        return 0x1F0007D7;
+        r = 0x1F0007D7;
+        break;
     case 0x68:    // APBIPRST1
-        return s->apbiprst1;
+        r = s->apbiprst1;
+        break;
     case 0x1fc:
-        return 0x00000001;
+        r = 0x00000001;
+        break;
     default:
-        return 0;
+        break;
     }
+
+    fprintf(stderr, "sys_read(offset=%lx, value=%08x)\n", offset, r);
+    return r;
 }
 
 static void nuc970_sys_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970SysState* s = (NUC970SysState*)opaque;
+    fprintf(stderr, "sys_write(offset=%lx, value=%08x)\n", offset, value);
     switch (offset)
     {
     case 0x68:
@@ -1474,6 +1482,9 @@ static const int nuc970_tim_irq[] = {
 
 #define INIT_SHADOW_REGION 1
 
+void nuc970_connect_flash(DeviceState* dev, int cs_no,
+    const char* flash_type, DriveInfo* dinfo);
+
 static void nuc970_init(MachineState* machine)
 {
     ARMCPU* cpu;
@@ -1671,7 +1682,16 @@ static void nuc970_init(MachineState* machine)
     uart[1] = nuc970_uart_create(0xb8000100, 64, 1, serial_hd(1),
         qdev_get_gpio_in(aic, 37));
 
+    /*** SPI ***/
+    dev = qdev_new("nuc970-spi");
+    qdev_prop_set_uint8(dev, "num-ss-bits", 2);
+
+    s = SYS_BUS_DEVICE(dev);
+
+    sysbus_realize(s, &error_abort);
+    sysbus_mmio_map(s, 0, 0xb8006200);
     
+
 
     // test shadow memory region
     /*

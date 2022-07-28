@@ -93,6 +93,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ClCompile Include="hw\arm\nuc970.c" />
+    <ClCompile Include="hw\block\m25p80.c" />
     <ClCompile Include="hw\char\nuc970_uart.c" />
     <ClCompile Include="hw\intc\nuc970_aic.c" />
     <ClCompile Include="hw\ssi\nuc970_spi.c" />

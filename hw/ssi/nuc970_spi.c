@@ -8,8 +8,16 @@
 #include "hw/qdev-properties.h"
 #include "hw/ssi/ssi.h"
 #include "qom/object.h"
+#include "qapi/error.h"
+#include "sysemu/blockdev.h"
+#include "hw/block/flash.h"
+#include "qemu/error-report.h"
+#include "qemu/log.h"
 
-#define NUC970_SPI_ERR_DEBUG 1
+#include "trace.h"
+
+
+#define NUC970_SPI_ERR_DEBUG 0
 
 #if NUC970_SPI_ERR_DEBUG
 #define DB_PRINT(...) do { \
@@ -43,8 +51,14 @@ struct NUC970SPI {
     uint32_t cntrl;
     uint32_t divider;
     uint32_t ssr;
-    uint32_t rx[4];
-    uint32_t tx[4];
+    /*
+    The RxX and TxX registers share the same flip-flops, which means that what is
+    received from the input data line in one transfer will be transmitted on the output data line in
+    the next transfer if no write access to the TxX register is executed between the transfers.
+    */
+    uint32_t rxtx[4];
+    int transfer_busy;
+    int active_cs;
 };
 
 static const VMStateDescription vmstate_nuc970_spi = {
@@ -58,8 +72,7 @@ static const VMStateDescription vmstate_nuc970_spi = {
         VMSTATE_UINT32(cntrl, NUC970SPI),
         VMSTATE_UINT32(divider, NUC970SPI),
         VMSTATE_UINT32(ssr, NUC970SPI),
-        VMSTATE_UINT32_ARRAY(rx, NUC970SPI, 4),
-        VMSTATE_UINT32_ARRAY(tx, NUC970SPI, 4),
+        VMSTATE_UINT32_ARRAY(rxtx, NUC970SPI, 4),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -69,6 +82,50 @@ static Property nuc970_spi_properties[] = {
     DEFINE_PROP_UINT8("num-ss-bits", NUC970SPI, num_cs, 1),
     DEFINE_PROP_END_OF_LIST(),
 };
+
+static void
+update_interrupt(NUC970SPI* spi)
+{
+    
+    if ((spi->cntrl & (1 << 17)) && (spi->cntrl & (1 << 16))) {
+        qemu_set_irq(spi->irq, 1);
+    }
+    else {
+        qemu_set_irq(spi->irq, 0);
+    }
+}
+
+/* Assert the chip select specified in the UMA Control/Status Register. */
+static void nuc970_spi_select(NUC970SPI* s, unsigned cs_id)
+{
+    trace_npcm7xx_fiu_select(DEVICE(s)->canonical_path, cs_id);
+
+    if (cs_id < s->num_cs) {
+        //qemu_irq_lower(s->cs_lines[cs_id]);
+        qemu_irq_raise(s->cs_lines[cs_id]);
+        s->active_cs = cs_id;
+    }
+    else {
+        qemu_log_mask(LOG_GUEST_ERROR,
+            "%s: UMA to CS%d; this module has only %d chip selects",
+            DEVICE(s)->canonical_path, cs_id, s->num_cs);
+        s->active_cs = -1;
+    }
+}
+
+/* Deassert the currently active chip select. */
+static void nuc970_spi_deselect(NUC970SPI* s)
+{
+    if (s->active_cs < 0) {
+        return;
+    }
+
+    trace_npcm7xx_fiu_deselect(DEVICE(s)->canonical_path, s->active_cs);
+
+    //qemu_irq_raise(s->cs_lines[s->active_cs]);
+    qemu_irq_lower(s->cs_lines[s->active_cs]);
+    s->active_cs = -1;
+}
 
 static void nuc970_spi_do_reset(NUC970SPI* s)
 {
@@ -84,10 +141,9 @@ static void nuc970_spi_do_reset(NUC970SPI* s)
     s->divider = 0;
     s->ssr = 0;
     for (int i = 0; i < 4; i++) {
-        s->rx[i] = 0;
-        s->tx[i] = 0;
+        s->rxtx[i] = 0;
     }
-
+    s->transfer_busy = 0;
 }
 
 static void nuc970_spi_reset(DeviceState* d)
@@ -100,9 +156,79 @@ spi_read(void* opaque, hwaddr addr, unsigned int size)
 {
     NUC970SPI* s = opaque;
     uint32_t r = 0;
+    switch (addr) {
+    case 0x00:
+        r = (s->cntrl & (~1)) | (s->transfer_busy);
+        break;
+    case 0x04:
+        r = s->divider;
+        break;
+    case 0x08:
+        r = s->ssr;
+        break;
+    case 0x10:
+        r = s->rxtx[0];
+        break;
+    case 0x14:
+        r = s->rxtx[1];
+        break;
+    case 0x18:
+        r = s->rxtx[2];
+        break;
+    case 0x1c:
+        r = s->rxtx[3];
+        break;
+    }
 
     DB_PRINT("addr=" TARGET_FMT_plx " = %x\n", addr, r);
     return r;
+
+}
+
+static void
+run_transfer(void* clientData)
+{
+    NUC970SPI* cspi = (NUC970SPI*)clientData;
+
+    int Tx_NUM = (cspi->cntrl >> 8) & 0x03;		// [9:8] Tx_NUM
+    int Tx_BIT_LEN = (cspi->cntrl >> 3) & 0x1f; // [7:3] Tx_BIT_LEN
+    int i;
+    uint32_t rx[4] = { 0, 0, 0, 0 };
+    for (i = 0; i < (Tx_NUM + 1); i++)
+    {
+        if (!Tx_BIT_LEN) // 32 bit
+        {
+            uint8_t ret = ssi_transfer(cspi->spi, cspi->rxtx[i] >> 0);
+            //fprintf(stderr, " %02x => %08x\n", cspi->SPI_TxRx[i] >> 0 & 0xff, ret);
+            rx[i] |= (ret & 0xff) << 24;
+
+            ret = ssi_transfer(cspi->spi, cspi->rxtx[i] >> 8);
+            //fprintf(stderr, " %02x => %08x\n", cspi->SPI_TxRx[i] >> 8 & 0xff, ret);
+            rx[i] |= (ret & 0xff) << 16;
+
+            ret = ssi_transfer(cspi->spi, cspi->rxtx[i] >> 16);
+            //fprintf(stderr, " %02x => %08x\n", cspi->SPI_TxRx[i] >> 16 & 0xff, ret);
+            rx[i] |= (ret & 0xff) << 8;
+
+            ret = ssi_transfer(cspi->spi, cspi->rxtx[i] >> 24);
+            //fprintf(stderr, " %02x => %08x\n", cspi->SPI_TxRx[i] >> 24 & 0xff, ret);
+            rx[i] |= (ret & 0xff) << 0;
+
+            cspi->rxtx[i] = rx[i];
+        }
+        else
+        {
+            rx[i] = ssi_transfer(cspi->spi, cspi->rxtx[i]);
+            cspi->rxtx[i] = rx[i];
+        }
+    }
+
+    cspi->transfer_busy = 0;
+    if (cspi->cntrl >> 17 & 0x01) { // Interrupt Enabled
+        cspi->cntrl |= 1 << 16;
+        update_interrupt(cspi);		// transfer done
+    }
+
 
 }
 
@@ -112,6 +238,60 @@ spi_write(void* opaque, hwaddr addr,
 {
     NUC970SPI* s = opaque;
     uint32_t value = val64;
+    switch (addr)
+    {
+    case 0x00:
+        s->cntrl = value;
+        if ((value >> 17) & 0x01) {
+            //fprintf(stderr, "\033[;32m[%ld] Enable SPI Interrupt %08x \033[0m\n", CycleCounter_Get(), value);
+
+            if ((value >> 16) & 0x01) { // This bit is read only, but can be cleared by writing 1 to this bit.
+                s->cntrl &= ~(1 << 16); // clear interrupt flag
+                update_interrupt(s);
+            }
+        }
+
+        if (value & 1) {	// GO BUSY
+            //fprintf(stderr, "Start XCH ...\n");
+            int Tx_NUM = (value >> 8) & 0x03;		// [9:8] Tx_NUM
+            int Tx_BIT_LEN = (value >> 3) & 0x1f; // [7:3] Tx_BIT_LEN
+            int t;
+
+            s->transfer_busy = 1;
+            //s->cntrl &= ~(1 << 16); // clear interrupt flag
+            
+            run_transfer(s);
+            
+        }        
+        break;
+    case 0x04:
+        s->divider = value;
+        break;
+    case 0x08:
+        s->ssr = value;
+        if (value & 0x01)
+            nuc970_spi_select(s, 0);
+        else
+            nuc970_spi_deselect(s);
+        if (value & 0x02)
+            nuc970_spi_select(s, 1);
+        else
+            nuc970_spi_deselect(s);
+        break;
+    case 0x10:
+        s->rxtx[0] = value;
+        break;
+    case 0x14:
+        s->rxtx[1] = value;
+        break;
+    case 0x18:
+        s->rxtx[2] = value;
+        break;
+    case 0x1c:
+        s->rxtx[3] = value;
+        break;
+
+    }
 
     DB_PRINT("addr=" TARGET_FMT_plx " = %x\n", addr, value);
 }
@@ -126,6 +306,41 @@ static const MemoryRegionOps spi_ops = {
     }
 };
 
+void nuc970_connect_flash(DeviceState* dev, int cs_no,
+    const char* flash_type, DriveInfo* dinfo)
+{
+    DeviceState* flash;
+    qemu_irq flash_cs;
+
+    NUC970SPI* s = NUC970_SPI(dev);
+    flash = qdev_new(flash_type);
+
+    if (dinfo) {
+        BlockBackend* blk = blk_by_legacy_dinfo(dinfo);
+        int64_t size;
+
+        /*
+         * The block backend size should have already been 'validated' by
+         * the creation of the m25p80 object.
+         */
+        size = blk_getlength(blk);
+        if (size <= 0) {
+            error_report("failed to get flash size");
+            return;
+        }
+        else {
+            info_report("blk_getlength: %lx\n", size);
+        }
+
+        qdev_prop_set_drive_err(flash, "drive", blk, &error_fatal);
+    }
+    qdev_realize_and_unref(flash, BUS(s->spi), &error_fatal);
+
+    flash_cs = qdev_get_gpio_in_named(flash, SSI_GPIO_CS, 0);
+    qdev_connect_gpio_out_named(DEVICE(s), "cs", cs_no, flash_cs);
+}
+
+
 static void nuc970_spi_realize(DeviceState* dev, Error** errp)
 {
     SysBusDevice* sbd = SYS_BUS_DEVICE(dev);
@@ -137,10 +352,11 @@ static void nuc970_spi_realize(DeviceState* dev, Error** errp)
     s->spi = ssi_create_bus(dev, "spi");
 
     sysbus_init_irq(sbd, &s->irq);
-    //s->cs_lines = g_new0(qemu_irq, s->num_cs);
-    //for (i = 0; i < s->num_cs; ++i) {
-    //    sysbus_init_irq(sbd, &s->cs_lines[i]);
-    //}
+    s->cs_lines = g_new0(qemu_irq, s->num_cs);
+    for (i = 0; i < s->num_cs; ++i) {
+        sysbus_init_irq(sbd, &s->cs_lines[i]);
+    }
+    qdev_init_gpio_out_named(DEVICE(s), s->cs_lines, "cs", s->num_cs);
 
     memory_region_init_io(&s->mmio, OBJECT(s), &spi_ops, s,
         "nuc970-spi", 11 * 4);
@@ -150,6 +366,11 @@ static void nuc970_spi_realize(DeviceState* dev, Error** errp)
 
     //fifo8_create(&s->tx_fifo, FIFO_CAPACITY);
     //fifo8_create(&s->rx_fifo, FIFO_CAPACITY);
+
+    nuc970_connect_flash(dev, 0, "w25q256", drive_get(IF_MTD, 0, 0));
+    //nuc970_connect_flash(dev, 0, "s25fl064k", drive_get(IF_MTD, 0, 0));
+    //nuc970_connect_flash(dev, 0, "sst25vf032b", drive_get(IF_MTD, 0, 0));
+    
 }
 
 static void nuc970_spi_class_init(ObjectClass* klass, void* data)
@@ -175,5 +396,8 @@ static void nuc970_spi_register_types(void)
 }
 
 type_init(nuc970_spi_register_types)
+
+
+
 
 
