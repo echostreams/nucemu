@@ -338,6 +338,7 @@ static const FlashPartInfo known_devices[] = {
     { INFO("w25q64",      0xef4017,      0,  64 << 10, 128, ER_4K) },
     { INFO("w25q80",      0xef5014,      0,  64 << 10,  16, ER_4K) },
     { INFO("w25q80bl",    0xef4014,      0,  64 << 10,  16, ER_4K) },
+    { INFO("W25Q128BV",	  0xef4018,      0,	 64 << 10, 256,	ER_4K) },
     { INFO("w25q256",     0xef4019,      0,  64 << 10, 512, ER_4K) },
     { INFO("w25q512jv",   0xef4020,      0,  64 << 10, 1024, ER_4K) },
     { INFO("w25q01jvq",   0xef4021,      0,  64 << 10, 2048, ER_4K) },
@@ -687,6 +688,8 @@ static void complete_collecting_data(Flash* s)
     trace_m25p80_complete_collecting(s, s->cmd_in_progress, n, s->ear,
         s->cur_addr);
 
+    //fprintf(stderr, "  m25p80_complete_collecting: cmd %02x, cur_addr %08x\n", s->cmd_in_progress, s->cur_addr);
+
     switch (s->cmd_in_progress) {
     case DPP:
     case QPP:
@@ -738,6 +741,9 @@ static void complete_collecting_data(Flash* s)
                 s->volatile_cfg = s->data[1];
                 s->four_bytes_address_mode = extract32(s->data[1], 5, 1);
             }
+            break;
+        case MAN_WINBOND:
+            s->quad_enable = extract32(s->data[1], 1, 1);
             break;
         default:
             break;
@@ -911,7 +917,7 @@ static void decode_fast_read_cmd(Flash* s)
         s->needed_bytes += 1;
         break;
     case MAN_WINBOND:
-        s->needed_bytes += 8;
+        s->needed_bytes += 1;// 8;
         break;
     case MAN_NUMONYX:
         s->needed_bytes += numonyx_extract_cfg_num_dummies(s);
@@ -1183,6 +1189,7 @@ static void decode_new_cmd(Flash* s, uint32_t value)
         if (s->write_enable) {
             switch (get_man(s)) {
             case MAN_SPANSION:
+            case MAN_WINBOND:
                 s->needed_bytes = 2;
                 s->state = STATE_COLLECTING_DATA;
                 break;
@@ -1237,14 +1244,18 @@ static void decode_new_cmd(Flash* s, uint32_t value)
     case JEDEC_READ:
         if (get_man(s) != MAN_NUMONYX || numonyx_mode(s) == MODE_STD) {
             trace_m25p80_populated_jedec(s);
+            int max_idlen = SPI_NOR_MAX_ID_LEN;
+            if (get_man(s) == MAN_WINBOND) {
+                max_idlen = 6;// 5;
+            }
             for (i = 0; i < s->pi->id_len; i++) {
                 s->data[i] = s->pi->id[i];
             }
-            for (; i < SPI_NOR_MAX_ID_LEN; i++) {
+            for (; i < max_idlen; i++) {
                 s->data[i] = 0;
             }
 
-            s->len = SPI_NOR_MAX_ID_LEN;
+            s->len = max_idlen;
             s->pos = 0;
             s->state = STATE_READING_DATA;
         }
@@ -1351,6 +1362,7 @@ static void decode_new_cmd(Flash* s, uint32_t value)
     case RDCR_EQIO:
         switch (get_man(s)) {
         case MAN_SPANSION:
+        case MAN_WINBOND:
             s->data[0] = (!!s->quad_enable) << 1;
             s->pos = 0;
             s->len = 1;

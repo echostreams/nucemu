@@ -95,7 +95,10 @@
     <ClCompile Include="hw\arm\nuc970.c" />
     <ClCompile Include="hw\block\m25p80.c" />
     <ClCompile Include="hw\char\nuc970_uart.c" />
+    <ClCompile Include="hw\i2c\nuc970_i2c.c" />
     <ClCompile Include="hw\intc\nuc970_aic.c" />
+    <ClCompile Include="hw\misc\nuc970_rng.c" />
+    <ClCompile Include="hw\net\nuc970_emc.c" />
     <ClCompile Include="hw\ssi\nuc970_spi.c" />
     <ClCompile Include="hw\timer\nuc970_timer.c" />
     <ClCompile Include="main.c" />
@@ -103,8 +106,11 @@
     <ClCompile Include="tests\qtest\boot-serial-test.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="include\hw\arm\nuc970.h" />
     <ClInclude Include="include\hw\char\nuc970_uart.h" />
+    <ClInclude Include="include\hw\i2c\nuc970_i2c.h" />
     <ClInclude Include="include\hw\intc\nuc970_aic.h" />
+    <ClInclude Include="include\hw\net\nuc970_emc.h" />
     <ClInclude Include="include\hw\timer\nuc970_timer.h" />
     <ClInclude Include="test.h" />
   </ItemGroup>
@@ -114,7 +120,10 @@
     <None Include="hw\arm\Kconfig" />
     <None Include="hw\arm\meson.build" />
     <None Include="hw\char\meson.build" />
+    <None Include="hw\i2c\meson.build" />
     <None Include="hw\intc\meson.build" />
+    <None Include="hw\misc\meson.build" />
+    <None Include="hw\net\meson.build" />
     <None Include="hw\ssi\meson.build" />
     <None Include="hw\timer\meson.build" />
     <None Include="meson.build" />

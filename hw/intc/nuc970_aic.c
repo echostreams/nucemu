@@ -118,10 +118,13 @@ static void nuc970_aic_update(NUC970AicState* s)
     int irq = nuc970_aic_get_irq(s);
     if (irq > 0)
     {
+        //fprintf(stderr, "Get IRQ %d, vector %d\n", irq, s->vector);
         if (!s->vector) {
             s->vector = irq;
             s->oisr |= 1 << 1;
-            DPRINTF("set IRQ %d\n", i);
+            //DPRINTF("set IRQ %d\n", irq);
+            //if (irq != 16)
+            //    fprintf(stderr, "set IRQ %d\n", irq);
             qemu_set_irq(s->irq, 1);
         }
         else {
@@ -140,11 +143,16 @@ static void nuc970_aic_set_irq(void* opaque, int irq, int level)
 
     if (level) {
         DPRINTF("Raising IRQ %d, prio %d\n", irq, nuc970_aic_prio(s, irq));
+        
         s->raw_status |= (1ULL << irq);
+        //if (irq != 16)
+        //    fprintf(stderr, "Raising IRQ %d, prio %d, irq %lx, enable %lx\n", irq, nuc970_aic_prio(s, irq), 
+        //        s->raw_status, s->enabled);
     }
     else {
-        //DPRINTF("Clearing IRQ %d, prio %d\n", irq, nuc970_aic_prio(s, irq));
+        DPRINTF("Clearing IRQ %d, prio %d\n", irq, nuc970_aic_prio(s, irq));        
         s->raw_status &= ~(1ULL << irq);
+        //fprintf(stderr, "Clearing IRQ %d, prio %d, irq %lx\n", irq, nuc970_aic_prio(s, irq), s->raw_status);
     }
 
     nuc970_aic_update(s);
@@ -240,11 +248,15 @@ static void nuc970_aic_write(void* opaque, hwaddr offset,
 
     case 0x130/4:
         //DPRINTF(" MECR : %08x\n", val);
-        s->enabled = (s->enabled & 0xffffffff00000000ULL) | val;
+        //fprintf(stderr, "  MECR: %lx %08x\n", s->enabled, val);
+        s->enabled |= val;
+        //fprintf(stderr, "  enable: %lx\n", s->enabled);
         break;
     case 0x134/4:
         //DPRINTF(" MECRH: %08x\n", val);
-        s->enabled = (s->enabled & 0xffffffffULL) | (val << 32);
+        //fprintf(stderr, "  MECRH: %lx %08x\n", s->enabled, val);
+        s->enabled |= (val << 32);
+        //fprintf(stderr, "  enable: %lx\n", s->enabled);
         break;
     case 0x138/4:
         s->enabled = s->enabled & ~val;

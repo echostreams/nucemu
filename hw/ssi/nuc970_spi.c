@@ -56,7 +56,9 @@ struct NUC970SPI {
     received from the input data line in one transfer will be transmitted on the output data line in
     the next transfer if no write access to the TxX register is executed between the transfers.
     */
-    uint32_t rxtx[4];
+    //uint32_t rxtx[4];
+    uint32_t rx[4];
+    uint32_t tx[4];
     int transfer_busy;
     int active_cs;
 };
@@ -72,7 +74,9 @@ static const VMStateDescription vmstate_nuc970_spi = {
         VMSTATE_UINT32(cntrl, NUC970SPI),
         VMSTATE_UINT32(divider, NUC970SPI),
         VMSTATE_UINT32(ssr, NUC970SPI),
-        VMSTATE_UINT32_ARRAY(rxtx, NUC970SPI, 4),
+        //VMSTATE_UINT32_ARRAY(rxtx, NUC970SPI, 4),
+        VMSTATE_UINT32_ARRAY(rx, NUC970SPI, 4),
+        VMSTATE_UINT32_ARRAY(tx, NUC970SPI, 4),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -88,9 +92,11 @@ update_interrupt(NUC970SPI* spi)
 {
     
     if ((spi->cntrl & (1 << 17)) && (spi->cntrl & (1 << 16))) {
+        //fprintf(stderr, " spi update irq 1, %x\n", spi->tx[0]);
         qemu_set_irq(spi->irq, 1);
     }
     else {
+        //fprintf(stderr, " spi update irq 0, %x\n", spi->tx[0]);
         qemu_set_irq(spi->irq, 0);
     }
 }
@@ -141,7 +147,8 @@ static void nuc970_spi_do_reset(NUC970SPI* s)
     s->divider = 0;
     s->ssr = 0;
     for (int i = 0; i < 4; i++) {
-        s->rxtx[i] = 0;
+        //s->rxtx[i] = 0;
+        s->rx[i] = s->tx[i] = 0;
     }
     s->transfer_busy = 0;
 }
@@ -167,20 +174,23 @@ spi_read(void* opaque, hwaddr addr, unsigned int size)
         r = s->ssr;
         break;
     case 0x10:
-        r = s->rxtx[0];
+        r = s->rx[0];
         break;
     case 0x14:
-        r = s->rxtx[1];
+        r = s->rx[1];
         break;
     case 0x18:
-        r = s->rxtx[2];
+        r = s->rx[2];
         break;
     case 0x1c:
-        r = s->rxtx[3];
+        r = s->rx[3];
         break;
     }
 
     DB_PRINT("addr=" TARGET_FMT_plx " = %x\n", addr, r);
+    if (s->cntrl >> 17 & 0x01) {
+        //fprintf(stderr, "addr=" TARGET_FMT_plx " = %x\n", addr, r);
+    }
     return r;
 
 }
@@ -198,28 +208,28 @@ run_transfer(void* clientData)
     {
         if (!Tx_BIT_LEN) // 32 bit
         {
-            uint8_t ret = ssi_transfer(cspi->spi, cspi->rxtx[i] >> 0);
+            uint8_t ret = ssi_transfer(cspi->spi, cspi->tx[i] >> 0);
             //fprintf(stderr, " %02x => %08x\n", cspi->SPI_TxRx[i] >> 0 & 0xff, ret);
             rx[i] |= (ret & 0xff) << 24;
 
-            ret = ssi_transfer(cspi->spi, cspi->rxtx[i] >> 8);
+            ret = ssi_transfer(cspi->spi, cspi->tx[i] >> 8);
             //fprintf(stderr, " %02x => %08x\n", cspi->SPI_TxRx[i] >> 8 & 0xff, ret);
             rx[i] |= (ret & 0xff) << 16;
 
-            ret = ssi_transfer(cspi->spi, cspi->rxtx[i] >> 16);
+            ret = ssi_transfer(cspi->spi, cspi->tx[i] >> 16);
             //fprintf(stderr, " %02x => %08x\n", cspi->SPI_TxRx[i] >> 16 & 0xff, ret);
             rx[i] |= (ret & 0xff) << 8;
 
-            ret = ssi_transfer(cspi->spi, cspi->rxtx[i] >> 24);
+            ret = ssi_transfer(cspi->spi, cspi->tx[i] >> 24);
             //fprintf(stderr, " %02x => %08x\n", cspi->SPI_TxRx[i] >> 24 & 0xff, ret);
             rx[i] |= (ret & 0xff) << 0;
 
-            cspi->rxtx[i] = rx[i];
+            cspi->rx[i] = rx[i];
         }
         else
         {
-            rx[i] = ssi_transfer(cspi->spi, cspi->rxtx[i]);
-            cspi->rxtx[i] = rx[i];
+            rx[i] = ssi_transfer(cspi->spi, cspi->tx[i]);
+            cspi->rx[i] = rx[i];
         }
     }
 
@@ -279,16 +289,16 @@ spi_write(void* opaque, hwaddr addr,
             nuc970_spi_deselect(s);
         break;
     case 0x10:
-        s->rxtx[0] = value;
+        s->tx[0] = value;
         break;
     case 0x14:
-        s->rxtx[1] = value;
+        s->tx[1] = value;
         break;
     case 0x18:
-        s->rxtx[2] = value;
+        s->tx[2] = value;
         break;
     case 0x1c:
-        s->rxtx[3] = value;
+        s->tx[3] = value;
         break;
 
     }
@@ -368,8 +378,11 @@ static void nuc970_spi_realize(DeviceState* dev, Error** errp)
     //fifo8_create(&s->rx_fifo, FIFO_CAPACITY);
 
     nuc970_connect_flash(dev, 0, "w25q256", drive_get(IF_MTD, 0, 0));
-    //nuc970_connect_flash(dev, 0, "s25fl064k", drive_get(IF_MTD, 0, 0));
+    //nuc970_connect_flash(dev, 0, "s25sl12801", drive_get(IF_MTD, 0, 0));
     //nuc970_connect_flash(dev, 0, "sst25vf032b", drive_get(IF_MTD, 0, 0));
+    //nuc970_connect_flash(dev, 0, "W25Q128BV", drive_get(IF_MTD, 0, 0));
+    //nuc970_connect_flash(dev, 0, "s25fl016k", drive_get(IF_MTD, 0, 0));
+    
     
 }
 

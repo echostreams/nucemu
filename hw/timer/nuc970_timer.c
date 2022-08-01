@@ -89,6 +89,8 @@ static void npcm7xx_timer_start(NPCM7xxBaseTimer* t)
 
     now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     t->expires_ns = now + t->remaining_ns;
+
+    //fprintf(stderr, "timer start: now %d, remaining_ns %d, expires_ns %d\n", now, t->remaining_ns, t->expires_ns);
     timer_mod(&t->qtimer, t->expires_ns);
 }
 
@@ -134,10 +136,28 @@ static uint32_t npcm7xx_tcsr_prescaler(uint32_t tcsr)
 static int64_t npcm7xx_timer_count_to_ns(NPCM7xxTimer* t, uint32_t count)
 {
     int64_t ticks = count;
+    uint64_t ns_low, ns_high;
 
     ticks *= npcm7xx_tcsr_prescaler(t->tcsr);
 
-    return clock_ticks_to_ns(t->ctrl->clock, ticks);
+    //fprintf(stderr, "timer count to ns: ticks %ld, period %ld\n", ticks, t->ctrl->clock->period);
+
+    //return clock_ticks_to_ns(t->ctrl->clock, ticks);
+
+    /*
+     * clk->period is the period in units of 2^-32 ns, so
+     * (clk->period * ticks) is the required length of time in those
+     * units, and we can convert to nanoseconds by multiplying by
+     * 2^32, which is the same as shifting the 128-bit multiplication
+     * result right by 32.
+     */
+    //12 MHz = 83.333333333333 ns(p)
+    mulu64(&ns_low, &ns_high, t->ctrl->clock->period, ticks);
+    if (ns_high & MAKE_64BIT_MASK(31, 33)) {
+        return INT64_MAX;
+    }
+    return ns_low >> 32 | ns_high << 32;
+    
 }
 
 /* Convert a time interval in nanoseconds to a timer cycle count. */
@@ -241,6 +261,8 @@ static void npcm7xx_timer_restart(NPCM7xxTimer* t, uint32_t old_tcsr)
 {
     t->base_timer.remaining_ns = npcm7xx_timer_count_to_ns(t, t->ticr);
 
+    //fprintf(stderr, "timer_restart: ticr %d, remaining_ns %ld\n", t->ticr, t->base_timer.remaining_ns);
+
     if (old_tcsr & t->tcsr & NPCM7XX_TCSR_CEN) {
         npcm7xx_timer_start(&t->base_timer);
     }
@@ -253,7 +275,10 @@ static uint32_t npcm7xx_timer_read_tdr(NPCM7xxTimer* t)
     if (t->tcsr & NPCM7XX_TCSR_CEN) {
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
 
-        return npcm7xx_timer_ns_to_count(t, t->base_timer.expires_ns - now);
+        uint32_t r = npcm7xx_timer_ns_to_count(t, t->base_timer.expires_ns - now);
+        //fprintf(stderr, "timer_read_tdr: %d, now: %ld, exp: %ld, %ld\n", r, now, 
+        //    t->base_timer.expires_ns, t->base_timer.expires_ns - now);
+        return r;
     }
 
     return npcm7xx_timer_ns_to_count(t, t->base_timer.remaining_ns);
@@ -330,6 +355,7 @@ static void npcm7xx_timer_write_tisr(NPCM7xxTimerCtrlState* s, uint32_t value)
     s->tisr &= ~value;
     for (i = 0; i < ARRAY_SIZE(s->timer); i++) {
         if (value & (1U << i)) {
+            //fprintf(stderr, " write tisr %08x\n", value);
             npcm7xx_timer_check_interrupt(&s->timer[i]);
         }
 
@@ -529,8 +555,8 @@ static void npcm7xx_timer_write(void* opaque, hwaddr offset,
     }
 
     qemu_log_mask(LOG_GUEST_ERROR,
-        "%s: invalid offset 0x%04" HWADDR_PRIx "\n",
-        __func__, offset);
+        "%s: invalid offset 0x%04" HWADDR_PRIx ", value 0x%08x\n",
+        __func__, offset, value);
 }
 
 static const struct MemoryRegionOps npcm7xx_timer_ops = {
@@ -635,11 +661,15 @@ static void npcm7xx_timer_init(Object* obj)
     //sysbus_init_irq(sbd, &w->irq);
 
     memory_region_init_io(&s->iomem, obj, &npcm7xx_timer_ops, s,
-        TYPE_NPCM7XX_TIMER, 4 * KiB);
+        TYPE_NPCM7XX_TIMER, 0x100);
     sysbus_init_mmio(sbd, &s->iomem);
     //qdev_init_gpio_out_named(dev, &w->reset_signal,
     //    NPCM7XX_WATCHDOG_RESET_GPIO_OUT, 1);
     s->clock = qdev_init_clock_in(dev, "clock", NULL, NULL, 0);
+
+    //clock_update_hz(s->clock, 12 * 1000 * 1000); /* 12MHz */
+    clock_set_hz(s->clock, 12 * 1000 * 1000);
+    info_report(" NUC970 Timer clock period %lld\n", s->clock->period);
 }
 
 static const VMStateDescription vmstate_npcm7xx_base_timer = {

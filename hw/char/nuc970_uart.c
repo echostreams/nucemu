@@ -34,6 +34,60 @@
 #include "trace.h"
 #include "qom/object.h"
 
+#define UART_REG_RBR	0x00
+#define UART_REG_THR	0x00
+
+#define UART_REG_IER	0x04
+#define RDA_IEN			0x00000001
+#define THRE_IEN		0x00000002
+#define RTO_IEN			0x00000010
+#define TIME_OUT_EN		0x00000800
+
+#define UART_REG_FCR	0x08
+#define RFR			0x00000002
+#define TFR			0x00000004
+
+#define UART_REG_LCR	0x0C
+#define	NSB			0x00000004
+#define PBE			0x00000008
+#define EPE			0x00000010
+#define SPE			0x00000020
+#define BCB			0x00000040
+
+#define UART_REG_MCR	0x10
+#define UART_REG_MSR	0x14
+
+#define UART_REG_FSR	0x18
+#define RX_OVER_IF		0x00000001
+#define PEF			0x00000010
+#define FEF			0x00000020
+#define BIF			0x00000040
+#define RX_EMPTY		0x00004000
+#define TX_EMPTY		0x00400000
+#define TX_FULL			0x00800000
+#define RX_FULL			0x00008000
+#define TE_FLAG			0x10000000
+
+#define UART_REG_ISR	0x1C
+#define RDA_IF			0x00000001
+#define THRE_IF			0x00000002
+#define TOUT_IF			0x00000010
+#define THRE_INT		0x00000200
+
+#define UART_REG_TOR	0x20
+#define UART_REG_BAUD	0x24
+
+#define UART_REG_IRCR	0x28
+
+#define UART_REG_ALT_CSR 0x2C
+
+#define UART_FUN_SEL    0x30
+#define FUN_SEL_UART    0x00000000
+#define FUN_SEL_LIN     0x00000001
+#define FUN_SEL_IrDA    0x00000002
+#define FUN_SEL_RS485	0x00000003
+#define FUN_SEL_Msk		0x00000007
+
  /*
   *  Offsets for UART registers relative to SFR base address
   *  for UARTn
@@ -83,27 +137,27 @@
 #define I_(reg) (reg / sizeof(uint32_t))
 
 typedef struct NUC970UartReg {
-    const char* name; /* the only reason is the debug output */
-    hwaddr  offset;
-    uint32_t            reset_value;
+	const char* name; /* the only reason is the debug output */
+	hwaddr  offset;
+	uint32_t            reset_value;
 } NUC970UartReg;
 
 static const NUC970UartReg nuc970_uart_regs[] = {
-    {"UA_RBR",   ULCON,    0x00000000},
-    {"UA_IER",   UCON,     0x00000000},
-    {"UA_FCR",   UFCON,    0x00000000},
-    {"UA_LCR",   UMCON,    0x00000000},
-    {"UA_MCR",   UTRSTAT,  0x00000006},
-    {"UA_MSR",   UERSTAT,  0x00000000},
-    {"UA_FSR",   UFSTAT,   0x10404000}, /* 18: FIFO Status Register */
-    {"UA_ISR",   UMSTAT,   0x00000002}, /* RO */
-    {"UA_TOR",   UTXH,     0x00000000}, /* WO, undefined reset value*/
-    {"UA_BAUD",  URXH,     0x0F000000}, /* RO */
-    {"UA_IRCR",  UBRDIV,   0x00000040},
-    {"UA_ACSR",  UFRACVAL, 0x0000000C},
-    {"UA_FSEL",  UINTP,    0x00000000},
-    {"UA_LCTL",  UINTSP,   0x000c0000},
-    {"UA_LISR",  UINTM,    0x00000000},
+	{"UA_RBR",   ULCON,    0x00000000},
+	{"UA_IER",   UCON,     0x00000000},
+	{"UA_FCR",   UFCON,    0x00000000},
+	{"UA_LCR",   UMCON,    0x00000000},
+	{"UA_MCR",   UTRSTAT,  0x0000d200},
+	{"UA_MSR",   UERSTAT,  0x000001f0},
+	{"UA_FSR",   UFSTAT,   0x10404000}, /* 18: FIFO Status Register */
+	{"UA_ISR",   UMSTAT,   0x00000002}, /* RO */
+	{"UA_TOR",   UTXH,     0x00000000}, /* WO, undefined reset value*/
+	{"UA_BAUD",  URXH,     0x0F000000}, /* RO */
+	{"UA_IRCR",  UBRDIV,   0x00000040},
+	{"UA_ACSR",  UFRACVAL, 0x0000000C},
+	{"UA_FSEL",  UINTP,    0x00000000},
+	{"UA_LCTL",  UINTSP,   0x000c0000},
+	{"UA_LISR",  UINTM,    0x00000000},
 };
 
 #define NUC970_UART_REGS_MEM_SIZE    0x3C
@@ -150,31 +204,30 @@ static const NUC970UartReg nuc970_uart_regs[] = {
 #define UERSTAT_BREAK    0x8
 
 typedef struct {
-    uint8_t* data;
-    uint32_t    sp, rp; /* store and retrieve pointers */
-    uint32_t    size;
+	uint8_t* data;
+	uint32_t    sp, rp; /* store and retrieve pointers */
+	uint32_t    size;
 } NUC970UartFIFO;
 
 #define TYPE_NUC970_UART "nuc970.uart"
 OBJECT_DECLARE_SIMPLE_TYPE(NUC970UartState, NUC970_UART)
 
 struct NUC970UartState {
-    SysBusDevice parent_obj;
+	SysBusDevice parent_obj;
 
-    MemoryRegion iomem;
+	MemoryRegion iomem;
 
-    uint32_t             reg[NUC970_UART_REGS_MEM_SIZE / sizeof(uint32_t)];
-    NUC970UartFIFO   rx;
-    NUC970UartFIFO   tx;
+	uint32_t             reg[NUC970_UART_REGS_MEM_SIZE / sizeof(uint32_t)];
+	NUC970UartFIFO   rx;
+	NUC970UartFIFO   tx;
 
-    QEMUTimer* fifo_timeout_timer;
-    uint64_t wordtime;        /* word time in ns */
+	QEMUTimer* fifo_timeout_timer;
+	uint64_t wordtime;        /* word time in ns */
 
-    CharBackend       chr;
-    qemu_irq          irq;
-    qemu_irq          dmairq;
+	CharBackend       chr;
+	qemu_irq          irq;
 
-    uint32_t channel;
+	uint32_t channel;
 
 };
 
@@ -182,54 +235,54 @@ struct NUC970UartState {
 /* Used only for tracing */
 static const char* nuc970_uart_regname(hwaddr  offset)
 {
-    int i;
+	int i;
 
-    for (i = 0; i < ARRAY_SIZE(nuc970_uart_regs); i++) {
-        if (offset == nuc970_uart_regs[i].offset) {
-            return nuc970_uart_regs[i].name;
-        }
-    }
+	for (i = 0; i < ARRAY_SIZE(nuc970_uart_regs); i++) {
+		if (offset == nuc970_uart_regs[i].offset) {
+			return nuc970_uart_regs[i].name;
+		}
+	}
 
-    return NULL;
+	return NULL;
 }
 
 
 static void fifo_store(NUC970UartFIFO* q, uint8_t ch)
 {
-    q->data[q->sp] = ch;
-    q->sp = (q->sp + 1) % q->size;
+	q->data[q->sp] = ch;
+	q->sp = (q->sp + 1) % q->size;
 }
 
 static uint8_t fifo_retrieve(NUC970UartFIFO* q)
 {
-    uint8_t ret = q->data[q->rp];
-    q->rp = (q->rp + 1) % q->size;
-    return  ret;
+	uint8_t ret = q->data[q->rp];
+	q->rp = (q->rp + 1) % q->size;
+	return  ret;
 }
 
 static int fifo_elements_number(const NUC970UartFIFO* q)
 {
-    if (q->sp < q->rp) {
-        return q->size - q->rp + q->sp;
-    }
+	if (q->sp < q->rp) {
+		return q->size - q->rp + q->sp;
+	}
 
-    return q->sp - q->rp;
+	return q->sp - q->rp;
 }
 
 static int fifo_empty_elements_number(const NUC970UartFIFO* q)
 {
-    return q->size - fifo_elements_number(q);
+	return q->size - fifo_elements_number(q);
 }
 
 static void fifo_reset(NUC970UartFIFO* q)
 {
-    g_free(q->data);
-    q->data = NULL;
+	g_free(q->data);
+	q->data = NULL;
 
-    q->data = (uint8_t*)g_malloc0(q->size);
+	q->data = (uint8_t*)g_malloc0(q->size);
 
-    q->sp = 0;
-    q->rp = 0;
+	q->sp = 0;
+	q->rp = 0;
 }
 
 /*
@@ -238,628 +291,609 @@ static void fifo_reset(NUC970UartFIFO* q)
  * 1/2/4/6/8/10 High-speed
  */
 
-int FCR_HIGH_TRI_LEV[16] = { 1, 4, 8, 14, 30, 46, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62 };
-int FCR_NORM_TRI_LEV[16] = { 1, 4, 8, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14 };
+int FCR_HIGH_TRI_LEV[16] = { 1, /*1*/4, 8, 14, 30, 46, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62 };
+int FCR_NORM_TRI_LEV[16] = { 1, /*1*/4, 8, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14 };
 
 static uint32_t nuc970_uart_FIFO_trigger_level(uint32_t channel,
-    uint32_t reg)
+	uint32_t reg)
 {
-    switch (channel) {
-    case 0:
-    case 3:
-    case 5:
-    case 7:
-    case 9:
-    default:
-        return FCR_NORM_TRI_LEV[reg];
-    case 1:
-    case 2:
-    case 4:
-    case 6:
-    case 8:
-    case 10:
-        return FCR_HIGH_TRI_LEV[reg];       
-    }
+	switch (channel) {
+	case 0:
+	case 3:
+	case 5:
+	case 7:
+	case 9:
+	default:
+		return FCR_NORM_TRI_LEV[reg];
+	case 1:
+	case 2:
+	case 4:
+	case 6:
+	case 8:
+	case 10:
+		return FCR_HIGH_TRI_LEV[reg];
+	}
 }
 /*
 static uint32_t
 nuc970_uart_Tx_FIFO_trigger_level(const NUC970UartState* s)
 {
-    uint32_t reg;
+	uint32_t reg;
 
-    reg = (s->reg[I_(UA_FCR)] & UFCON_Tx_FIFO_TRIGGER_LEVEL) >>
-        UFCON_Tx_FIFO_TRIGGER_LEVEL_SHIFT;
+	reg = (s->reg[I_(UA_FCR)] & UFCON_Tx_FIFO_TRIGGER_LEVEL) >>
+		UFCON_Tx_FIFO_TRIGGER_LEVEL_SHIFT;
 
-    return nuc970_uart_FIFO_trigger_level(s->channel, reg);
+	return nuc970_uart_FIFO_trigger_level(s->channel, reg);
 }
 */
 static uint32_t
 nuc970_uart_Rx_FIFO_trigger_level(const NUC970UartState* s)
 {
-    uint32_t reg;
+	uint32_t reg;
 
-    reg = ((s->reg[I_(UA_FCR)] & UFCON_Rx_FIFO_TRIGGER_LEVEL) >>
-        UFCON_Rx_FIFO_TRIGGER_LEVEL_SHIFT);
+	reg = ((s->reg[I_(UA_FCR)] & UFCON_Rx_FIFO_TRIGGER_LEVEL) >>
+		UFCON_Rx_FIFO_TRIGGER_LEVEL_SHIFT);
 
-    return nuc970_uart_FIFO_trigger_level(s->channel, reg);
+	return nuc970_uart_FIFO_trigger_level(s->channel, reg);
 }
 
-/*
- * Update Rx DMA busy signal if Rx DMA is enabled. For simplicity,
- * mark DMA as busy if DMA is enabled and the receive buffer is empty.
+
+ /*
+ The UART Controller supports seven types of interrupts including
+ (1). LIN function interrupt (INT_LIN)
+ (2). Buffer error interrupt (INT_BUF_ERR)
+ (3). time-out interrupt (INT_TOUT)
+ (4). MODEM status interrupt (INT_MODEM)
+ (5). Line status interrupt (break error, parity error, framing error or RS-485 interrupt) (INT_RLS)
+ (6). Receiver threshold level reaching interrupt (INT_RDA)
+ (7). Transmitter FIFO empty interrupt (INT_THRE)
  */
-/*
-static void nuc970_uart_update_dmabusy(NUC970UartState* s)
-{
-    bool rx_dma_enabled = (s->reg[I_(UCON)] & 0x03) == 0x02;
-    uint32_t count = fifo_elements_number(&s->rx);
-
-    if (rx_dma_enabled && !count) {
-        qemu_irq_raise(s->dmairq);
-        trace_exynos_uart_dmabusy(s->channel);
-    }
-    else {
-        qemu_irq_lower(s->dmairq);
-        trace_exynos_uart_dmaready(s->channel);
-    }
-}
-*/
-/*
-The UART Controller supports seven types of interrupts including
-(1). LIN function interrupt (INT_LIN)
-(2). Buffer error interrupt (INT_BUF_ERR)
-(3). time-out interrupt (INT_TOUT)
-(4). MODEM status interrupt (INT_MODEM)
-(5). Line status interrupt (break error, parity error, framing error or RS-485 interrupt) (INT_RLS)
-(6). Receiver threshold level reaching interrupt (INT_RDA)
-(7). Transmitter FIFO empty interrupt (INT_THRE)
-*/
 
 static void nuc970_uart_update_irq(NUC970UartState* s)
 {
-    uint32_t count;
-    
-        //uint32_t count = (s->reg[I_(UFSTAT)] & UFSTAT_Tx_FIFO_COUNT) >>
-        //    UFSTAT_Tx_FIFO_COUNT_SHIFT;
-
-        //if (count <= nuc970_uart_Tx_FIFO_trigger_level(s)) {
-        //    s->reg[I_(UINTSP)] |= UINTSP_TXD;
-        //}
+	uint32_t count;
 
 
-        count = fifo_elements_number(&s->rx);
-        if (count && count >= nuc970_uart_Rx_FIFO_trigger_level(s)) {
-            //nuc970_uart_update_dmabusy(s);
-            s->reg[I_(UA_ISR)] |= 0x01; // RDA_IF;
-            //timer_del(s->fifo_timeout_timer);
-        }
-        else {
-            s->reg[I_(UA_ISR)] &= ~0x01; // RDA_IF;
-        }
+	count = fifo_elements_number(&s->rx);
+	if (count && count >= nuc970_uart_Rx_FIFO_trigger_level(s)) {
+		s->reg[I_(UA_ISR)] |= 0x01; // RDA_IF;
+		timer_del(s->fifo_timeout_timer);
+		s->reg[I_(UA_ISR)] &= ~(1 << 4);
+	}
+	else if ( count && (s->reg[I_(UA_ISR)] & (1<<4)) ) {
 
-        if (fifo_elements_number(&s->tx) == 0) {
-            s->reg[I_(UA_ISR)] |= 0x02;
-        }
-        else {
-            s->reg[I_(UA_ISR)] &= ~0x02;
-        }
-    
-    
+	}
+	else {
+		s->reg[I_(UA_ISR)] &= ~0x01; // RDA_IF;
+	}
 
-    //s->reg[I_(UINTP)] = s->reg[I_(UINTSP)] & ~s->reg[I_(UINTM)];
-        int interrupt = (s->reg[I_(UA_ISR)] & 0x3)  & (s->reg[I_(UA_IER)] & 0x3);
+	if (fifo_elements_number(&s->tx) == 0) {
+		s->reg[I_(UA_ISR)] |= 0x02;
+	}
+	else {
+		s->reg[I_(UA_ISR)] &= ~0x02;
+	}
 
-        DPRINTF(" uart[%d] interrupt: %x (%x & %x)\n", s->channel, interrupt, s->reg[I_(UA_ISR)], s->reg[I_(UA_IER)]);
 
-    //if (s->reg[I_(UINTP)]) {
-        if (interrupt) {
-        qemu_irq_raise(s->irq);
-        trace_exynos_uart_irq_raised(s->channel, s->reg[I_(UINTP)]);
-    }
-    else {
-        qemu_irq_lower(s->irq);
-        trace_exynos_uart_irq_lowered(s->channel);
-    }
+
+	//s->reg[I_(UINTP)] = s->reg[I_(UINTSP)] & ~s->reg[I_(UINTM)];
+	//
+	// 
+	//int interrupt = ((s->reg[I_(UA_ISR)] & 0x13) & (s->reg[I_(UA_IER)] & 0x13)) ||
+	//		((s->reg[I_(UA_ISR)] >> 12 & 0x1) & (s->reg[I_(UA_IER)] >> 11 & 0x1));
+	int interrupt = ((s->reg[I_(UA_ISR)] & 0x13) & (s->reg[I_(UA_IER)] & 0x13));
+
+	DPRINTF(" uart[%d] interrupt: %x (%x & %x)\n", s->channel, interrupt, 
+		s->reg[I_(UA_ISR)], s->reg[I_(UA_IER)]);
+	//fprintf(stderr, " uart[%d] interrupt: %x (%08x & %08x)\n", s->channel, interrupt,
+	//	s->reg[I_(UA_ISR)], s->reg[I_(UA_IER)]);
+
+	if (interrupt) {
+		qemu_irq_raise(s->irq);
+		trace_exynos_uart_irq_raised(s->channel, s->reg[I_(UA_ISR)]);
+	}
+	else {
+		qemu_irq_lower(s->irq);
+		trace_exynos_uart_irq_lowered(s->channel);
+	}
 }
 
 static void nuc970_uart_timeout_int(void* opaque)
 {
-    NUC970UartState* s = opaque;
+	NUC970UartState* s = opaque;
 
-    trace_exynos_uart_rx_timeout(s->channel, s->reg[I_(UTRSTAT)],
-        s->reg[I_(UINTSP)]);
+	trace_exynos_uart_rx_timeout(s->channel, s->reg[I_(UA_IER)],
+		s->reg[I_(UA_ISR)]);
 
-    if ((s->reg[I_(UTRSTAT)] & UTRSTAT_Rx_BUFFER_DATA_READY) ||
-        (s->reg[I_(UCON)] & (1 << 11))) {
-        //s->reg[I_(UINTSP)] |= UINTSP_RXD;
-        //s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_TIMEOUT;
-        //nuc970_uart_update_dmabusy(s);
-        nuc970_uart_update_irq(s);
-    }
+	if (fifo_elements_number(&s->rx) > 0 && s->reg[I_(UA_IER)] & (1 << 4)) {
+		s->reg[I_(UA_ISR)] |= (1 << 4);
+		if (s->reg[I_(UA_IER)] & (1 << 11)) {
+			s->reg[I_(UA_ISR)] |= (1 << 12);
+		}
+		
+		nuc970_uart_update_irq(s);
+	}
 }
 
 static int get_baudrate(uint32_t value)
 {
-    /*
-    [31:30] Reserved    Reserved.
-    [29]    DIV_X_EN    Divider X Enable Control
-        0 = Divider X Disabled (the equation of M = 16).
-        1 = Divider X Enabled (the equation of M = X+1, but DIVIDER_X(UA_BAUD[27:24]) must
-            >= 8).
-        Refer to the table below for more information.
-        Note: In IrDA mode, this bit must disable.
-        Note: The BRD = Baud Rate Divider, and the baud rate equation is
-        Baud Rate = Clock / [M * (BRD + 2)]; The default value of M is 16.
-    [28]    DIV_X_ONE   Divider X Equal to 1
-        0 = Divider M = X (the equation of M = X+1, but DIVIDER_X(UA_BAUD[27:24]) must >=
-        8).
-        1 = Divider M = 1 (the equation of M = 1, but BRD(UA_BAUD[15:0]) must >= 3).
-    [27:24] DIVIDER_X   Divider X
-        The baud rate divider M = X+1.
-    [23:16] Reserved    Reserved.
-    [15:0]  BRD         Baud Rate Divider
-        The field indicated the baud rate divider
+	/*
+	[31:30] Reserved    Reserved.
+	[29]    DIV_X_EN    Divider X Enable Control
+		0 = Divider X Disabled (the equation of M = 16).
+		1 = Divider X Enabled (the equation of M = X+1, but DIVIDER_X(UA_BAUD[27:24]) must
+			>= 8).
+		Refer to the table below for more information.
+		Note: In IrDA mode, this bit must disable.
+		Note: The BRD = Baud Rate Divider, and the baud rate equation is
+		Baud Rate = Clock / [M * (BRD + 2)]; The default value of M is 16.
+	[28]    DIV_X_ONE   Divider X Equal to 1
+		0 = Divider M = X (the equation of M = X+1, but DIVIDER_X(UA_BAUD[27:24]) must >=
+		8).
+		1 = Divider M = 1 (the equation of M = 1, but BRD(UA_BAUD[15:0]) must >= 3).
+	[27:24] DIVIDER_X   Divider X
+		The baud rate divider M = X+1.
+	[23:16] Reserved    Reserved.
+	[15:0]  BRD         Baud Rate Divider
+		The field indicated the baud rate divider
 
-     * The baud rate equation is: Baud Rate = UART_CLK / M * [BRD + 2]
-     * where M and BRD are defined in Baud Rate Divider Register (UA_BAUD).
-     *   Mode DIV_X_EN DIV_X_ONE DIVIDER X  BRD Baud Rate Equation
-     *   0    Disable  0         Don’t Care A   UART_CLK / [16 * (A+2)]
-     *   1    Enable   0         B          A   UART_CLK / [(B+1) * (A+2)] , B must >= 8
-     *   2    Enable   1         Don’t care A   UART_CLK / (A+2), A must >=9
-     */
-    uint32_t xEn = (value >> 29) & 0x1;
-    uint32_t xOne = (value >> 28) & 0x1;
-    uint32_t divX = (value >> 24) & 0xf;
-    uint32_t brd = value & 0xffff;
-    uint32_t m = 1;
-    if (!xEn)
-        m = 16;
-    else if (!xOne)
-        m = divX + 1;
+	 * The baud rate equation is: Baud Rate = UART_CLK / M * [BRD + 2]
+	 * where M and BRD are defined in Baud Rate Divider Register (UA_BAUD).
+	 *   Mode DIV_X_EN DIV_X_ONE DIVIDER X  BRD Baud Rate Equation
+	 *   0    Disable  0         Don’t Care A   UART_CLK / [16 * (A+2)]
+	 *   1    Enable   0         B          A   UART_CLK / [(B+1) * (A+2)] , B must >= 8
+	 *   2    Enable   1         Don’t care A   UART_CLK / (A+2), A must >=9
+	 */
+	uint32_t xEn = (value >> 29) & 0x1;
+	uint32_t xOne = (value >> 28) & 0x1;
+	uint32_t divX = (value >> 24) & 0xf;
+	uint32_t brd = value & 0xffff;
+	uint32_t m = 1;
+	if (!xEn)
+		m = 16;
+	else if (!xOne)
+		m = divX + 1;
 
-    int baudrate = 12000000 / (m * (brd + 2));
-    return baudrate;
+	int baudrate = 12000000 / (m * (brd + 2));
+	return baudrate;
 }
 
 static void nuc970_uart_update_parameters(NUC970UartState* s)
 {
-    int speed, parity, data_bits, stop_bits;
-    QEMUSerialSetParams ssp;
-    //uint64_t uclk_rate;
+	int speed, parity, data_bits, stop_bits;
+	QEMUSerialSetParams ssp;
+	//uint64_t uclk_rate;
 
-    if (s->reg[I_(UA_BAUD)] == 0) {
-        return;
-    }
+	if (s->reg[I_(UA_BAUD)] == 0) {
+		return;
+	}
 
-    if (s->reg[I_(UA_LCR)] & (1<<3)) {  // PBE: Parity Bit Enable Control
-        if (s->reg[I_(UA_LCR)] & (1<<4)) {  // EPE: Even Parity Enable Control
-            parity = 'E';
-        }
-        else {
-            parity = 'O';
-        }
-    }
-    else {
-        parity = 'N';
-    }
+	if (s->reg[I_(UA_LCR)] & (1 << 3)) {  // PBE: Parity Bit Enable Control
+		if (s->reg[I_(UA_LCR)] & (1 << 4)) {  // EPE: Even Parity Enable Control
+			parity = 'E';
+		}
+		else {
+			parity = 'O';
+		}
+	}
+	else {
+		parity = 'N';
+	}
 
-    if (s->reg[I_(UA_LCR)] & (1<<2)) {
-        stop_bits = 2;
-    }
-    else {
-        stop_bits = 1;
-    }
+	if (s->reg[I_(UA_LCR)] & (1 << 2)) {
+		stop_bits = 2;
+	}
+	else {
+		stop_bits = 1;
+	}
 
-    data_bits = (s->reg[I_(UA_LCR)] & 0x3) + 5;
+	data_bits = (s->reg[I_(UA_LCR)] & 0x3) + 5;
 
-    //uclk_rate = 24000000;
+	//uclk_rate = 24000000;
 
-    //speed = uclk_rate / ((16 * (s->reg[I_(UBRDIV)]) & 0xffff) +
-    //    (s->reg[I_(UFRACVAL)] & 0x7) + 16);
-    speed = get_baudrate(s->reg[I_(UA_BAUD)]);
+	//speed = uclk_rate / ((16 * (s->reg[I_(UBRDIV)]) & 0xffff) +
+	//    (s->reg[I_(UFRACVAL)] & 0x7) + 16);
+	speed = get_baudrate(s->reg[I_(UA_BAUD)]);
 
-    ssp.speed = speed;
-    ssp.parity = parity;
-    ssp.data_bits = data_bits;
-    ssp.stop_bits = stop_bits;
+	ssp.speed = speed;
+	ssp.parity = parity;
+	ssp.data_bits = data_bits;
+	ssp.stop_bits = stop_bits;
 
-    s->wordtime = NANOSECONDS_PER_SECOND * (data_bits + stop_bits + 1) / speed;
+	s->wordtime = NANOSECONDS_PER_SECOND * (data_bits + stop_bits + 1) / speed;
 
-    qemu_chr_fe_ioctl(&s->chr, CHR_IOCTL_SERIAL_SET_PARAMS, &ssp);
+	qemu_chr_fe_ioctl(&s->chr, CHR_IOCTL_SERIAL_SET_PARAMS, &ssp);
 
-    trace_exynos_uart_update_params(
-        s->channel, speed, parity, data_bits, stop_bits, s->wordtime);
+	trace_exynos_uart_update_params(
+		s->channel, speed, parity, data_bits, stop_bits, s->wordtime);
 }
 
 static void nuc970_uart_rx_timeout_set(NUC970UartState* s)
 {
-    if (s->reg[I_(UCON)] & 0x80) {
-        uint32_t timeout = ((s->reg[I_(UCON)] >> 12) & 0x0f) * s->wordtime;
+	if (s->reg[I_(UA_IER)] & (1 << 11)) {	// TIME_OUT_EN
+		uint32_t timeout = (s->reg[I_(UA_TOR)] & 0xff) * s->wordtime;
 
-        timer_mod(s->fifo_timeout_timer,
-            qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + timeout);
-    }
-    else {
-        timer_del(s->fifo_timeout_timer);
-    }
+		timer_mod(s->fifo_timeout_timer,
+			qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + timeout);
+	}
+	else {
+		timer_del(s->fifo_timeout_timer);
+	}
 }
 
 static void nuc970_uart_write(void* opaque, hwaddr offset,
-    uint64_t val, unsigned size)
+	uint64_t val, unsigned size)
 {
-    NUC970UartState* s = (NUC970UartState*)opaque;
-    Chardev* chr = qemu_chr_fe_get_driver(&s->chr);
-    uint8_t ch;
+	NUC970UartState* s = (NUC970UartState*)opaque;
+	Chardev* chr = qemu_chr_fe_get_driver(&s->chr);
+	uint8_t ch;
 
-    DPRINTF("write(offset=0x%" HWADDR_PRIx ", value = 0x%x) to %s\n",
-        offset, (unsigned int)val, chr ? chr->label : "NODEV");
+	DPRINTF("write(offset=0x%" HWADDR_PRIx ", value = 0x%x) to %s\n",
+		offset, (unsigned int)val, chr ? chr->label : "NODEV");
 
-    trace_exynos_uart_write(s->channel, offset,
-        nuc970_uart_regname(offset), val);
+	trace_exynos_uart_write(s->channel, offset,
+		nuc970_uart_regname(offset), val);
 
-    switch (offset) {
-    
-    case UA_BAUD:
-    case UA_LCR:
-        s->reg[I_(offset)] = val;
-        nuc970_uart_update_parameters(s);
-        break;
-    case UA_FCR:
-        s->reg[I_(UA_FCR)] = val;
-        if (val & UFCON_Rx_FIFO_RESET) {
-            fifo_reset(&s->rx);
-            s->reg[I_(UA_FCR)] &= ~UFCON_Rx_FIFO_RESET;
-            trace_exynos_uart_rx_fifo_reset(s->channel);
-        }
-        if (val & UFCON_Tx_FIFO_RESET) {
-            fifo_reset(&s->tx);
-            s->reg[I_(UA_FCR)] &= ~UFCON_Tx_FIFO_RESET;
-            trace_exynos_uart_tx_fifo_reset(s->channel);
-        }
-        break;
+	switch (offset) {
 
-    case UA_THR:
-    
-        if (s->channel == 1) {
-            bool connected = qemu_chr_fe_backend_connected(&s->chr);
-            DPRINTF(" uart[%d] backend_connected: %d\n", s->channel, connected);
-        }    
+	case UA_BAUD:
+	case UA_LCR:
+		s->reg[I_(offset)] = val;
+		nuc970_uart_update_parameters(s);
+		break;
+	case UA_FCR:
+		s->reg[I_(UA_FCR)] = val;
+		fprintf(stderr, "  UA_FCR: %lx\n", val);
+		if (val & UFCON_Rx_FIFO_RESET) {
+			fifo_reset(&s->rx);
+			s->reg[I_(UA_FCR)] &= ~UFCON_Rx_FIFO_RESET;
+			trace_exynos_uart_rx_fifo_reset(s->channel);
+		}
+		if (val & UFCON_Tx_FIFO_RESET) {
+			fifo_reset(&s->tx);
+			s->reg[I_(UA_FCR)] &= ~UFCON_Tx_FIFO_RESET;
+			trace_exynos_uart_tx_fifo_reset(s->channel);
+		}
+		break;
 
-        if (qemu_chr_fe_backend_connected(&s->chr)) {
-            //s->reg[I_(UTRSTAT)] &= ~(UTRSTAT_TRANSMITTER_EMPTY | UTRSTAT_Tx_BUFFER_EMPTY);
-            ch = (uint8_t)val;
-            /* XXX this blocks entire thread. Rewrite to use
-             * qemu_chr_fe_write and background I/O callbacks */
-            qemu_chr_fe_write_all(&s->chr, &ch, 1);
-            trace_exynos_uart_tx(s->channel, ch);
-            //s->reg[I_(UTRSTAT)] |= UTRSTAT_TRANSMITTER_EMPTY | UTRSTAT_Tx_BUFFER_EMPTY;
-            //s->reg[I_(UINTSP)] |= UINTSP_TXD;
-            nuc970_uart_update_irq(s);
-        }
-        break;
+	case UA_THR:
 
-    case UINTP:
-        s->reg[I_(UINTP)] &= ~val;
-        s->reg[I_(UINTSP)] &= ~val;
-        trace_exynos_uart_intclr(s->channel, s->reg[I_(UINTP)]);
-        nuc970_uart_update_irq(s);
-        break;
-    case UTRSTAT:
-        if (val & UTRSTAT_Rx_TIMEOUT) {
-            s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_TIMEOUT;
-        }
-        break;
-    case UERSTAT:
-    case UFSTAT:
-    case UMSTAT:
-        trace_exynos_uart_ro_write(
-            s->channel, nuc970_uart_regname(offset), offset);
-        break;
-    //case UINTSP:
-    //    s->reg[I_(UINTSP)] &= ~val;
-    //    break;
-    //case UINTM:
-    //    s->reg[I_(UINTM)] = val;
-    //    nuc970_uart_update_irq(s);
-    //    break;
-    case UA_IER:
-        fprintf(stderr, "\033[0;32m UA_IER[%d]: %" PRIx64 "\033[0m\n", s->channel, val);
-        s->reg[I_(offset)] = val;
-        // need to update irq
-        nuc970_uart_update_irq(s);
-        break;
-    default:
-        s->reg[I_(offset)] = val;
-        break;
-    }
+		
+
+		if (qemu_chr_fe_backend_connected(&s->chr)) {
+			//s->reg[I_(UTRSTAT)] &= ~(UTRSTAT_TRANSMITTER_EMPTY | UTRSTAT_Tx_BUFFER_EMPTY);
+			ch = (uint8_t)val;
+			/* XXX this blocks entire thread. Rewrite to use
+			 * qemu_chr_fe_write and background I/O callbacks */
+			qemu_chr_fe_write_all(&s->chr, &ch, 1);
+			trace_exynos_uart_tx(s->channel, ch);
+			//s->reg[I_(UTRSTAT)] |= UTRSTAT_TRANSMITTER_EMPTY | UTRSTAT_Tx_BUFFER_EMPTY;
+			//s->reg[I_(UINTSP)] |= UINTSP_TXD;
+			nuc970_uart_update_irq(s);
+		}
+		break;
+
+	case UINTP:
+		s->reg[I_(UINTP)] &= ~val;
+		s->reg[I_(UINTSP)] &= ~val;
+		trace_exynos_uart_intclr(s->channel, s->reg[I_(UINTP)]);
+		nuc970_uart_update_irq(s);
+		break;
+	case UTRSTAT:
+		if (val & UTRSTAT_Rx_TIMEOUT) {
+			s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_TIMEOUT;
+		}
+		break;
+	case UERSTAT:
+	case UFSTAT:
+	case UMSTAT:
+		trace_exynos_uart_ro_write(
+			s->channel, nuc970_uart_regname(offset), offset);
+		break;
+		//case UINTSP:
+		//    s->reg[I_(UINTSP)] &= ~val;
+		//    break;
+		//case UINTM:
+		//    s->reg[I_(UINTM)] = val;
+		//    nuc970_uart_update_irq(s);
+		//    break;
+	case UA_IER:
+		//fprintf(stderr, "\033[0;32m UA_IER[%d]: %" PRIx64 "\033[0m\n", s->channel, val);
+		s->reg[I_(offset)] = val;
+		// need to update irq
+		nuc970_uart_update_irq(s);
+		break;
+	default:
+		s->reg[I_(offset)] = val;
+		break;
+	}
 }
 
 static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
-    unsigned size)
+	unsigned size)
 {
-    NUC970UartState* s = (NUC970UartState*)opaque;
-    uint32_t res;    
+	NUC970UartState* s = (NUC970UartState*)opaque;
+	uint32_t res;
 
-    switch (offset) {
-    //case UERSTAT: /* Read Only */
-    //    res = s->reg[I_(UERSTAT)];
-    //    s->reg[I_(UERSTAT)] = 0;
-    //    trace_exynos_uart_read(s->channel, offset,
-    //        nuc970_uart_regname(offset), res);
-    //    return res;
-    case UA_FSR: /* FSR */
-        res = 0;
-        {
-            int tx_fill = fifo_elements_number(&s->tx);
-            int rx_fill = fifo_elements_number(&s->rx);
-            if (rx_fill <= 0) {
-                res |= 1 << 14; // RX_EMPTY;
-            }
-            if (tx_fill <= 0) {
-                res |= 1 << 22; // TX_EMPTY: the last byte of TXFIFO has been transferred to Transmitter Shift Register
-                res |= 1 << 28; // TE_FLAG: the STOP bit of the last byte has been transmitted.
-            }
-            res |= (tx_fill & 0x3f) << 16;	// TX_POINTER
-            res |= (rx_fill & 0x3f) << 8;	// RX_POINTER
-            
-            if (fifo_empty_elements_number(&s->rx) == 0) {
-                res |= 1 << 15; // RX_FULL;
-            }
-            if (fifo_empty_elements_number(&s->tx) == 0) {
-                res |= 1 << 23; // TX_FULL;
-            }
-        }
-        trace_exynos_uart_read(s->channel, offset,
-            nuc970_uart_regname(offset),
-            res);
-        break;
-    case UA_RBR:
-        //if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
-        if (1) {
-            if (fifo_elements_number(&s->rx)) {
-                res = fifo_retrieve(&s->rx);
-                trace_exynos_uart_rx(s->channel, res);
-                if (!fifo_elements_number(&s->rx)) {
-                    s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_BUFFER_DATA_READY;
-                }
-                else {
-                    s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_BUFFER_DATA_READY;
-                }
-            }
-            else {
-                trace_exynos_uart_rx_error(s->channel);
-                s->reg[I_(UINTSP)] |= UINTSP_ERROR;
-                nuc970_uart_update_irq(s);
-                res = 0;
-            }
-        }
-        else {
-            s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_BUFFER_DATA_READY;
-            res = s->reg[I_(URXH)];
-        }
-        qemu_chr_fe_accept_input(&s->chr);
-        //nuc970_uart_update_dmabusy(s);
-        trace_exynos_uart_read(s->channel, offset,
-            nuc970_uart_regname(offset), res);
-        break;
-    //case UTXH:
-    //    trace_exynos_uart_wo_read(s->channel, nuc970_uart_regname(offset),
-    //        offset);
-    //    break;
-    default:
-        trace_exynos_uart_read(s->channel, offset,
-            nuc970_uart_regname(offset),
-            s->reg[I_(offset)]);
-        res = s->reg[I_(offset)];
-        break;
-    }
+	switch (offset) {
+		//case UERSTAT: /* Read Only */
+		//    res = s->reg[I_(UERSTAT)];
+		//    s->reg[I_(UERSTAT)] = 0;
+		//    trace_exynos_uart_read(s->channel, offset,
+		//        nuc970_uart_regname(offset), res);
+		//    return res;
+	case UA_FSR: /* FSR */
+		res = 0;
+		{
+			int tx_fill = fifo_elements_number(&s->tx);
+			int rx_fill = fifo_elements_number(&s->rx);
+			if (rx_fill <= 0) {
+				res |= 1 << 14; // RX_EMPTY;
+			}
+			if (tx_fill <= 0) {
+				res |= 1 << 22; // TX_EMPTY: the last byte of TXFIFO has been transferred to Transmitter Shift Register
+				res |= 1 << 28; // TE_FLAG: the STOP bit of the last byte has been transmitted.
+			}
+			res |= (tx_fill & 0x3f) << 16;	// TX_POINTER
+			res |= (rx_fill & 0x3f) << 8;	// RX_POINTER
 
-    trace_exynos_uart_read(s->channel, offset, nuc970_uart_regname(offset),
-        0);
+			if (fifo_empty_elements_number(&s->rx) == 0) {
+				res |= 1 << 15; // RX_FULL;
+			}
+			if (fifo_empty_elements_number(&s->tx) == 0) {
+				res |= 1 << 23; // TX_FULL;
+			}
+		}
+		trace_exynos_uart_read(s->channel, offset,
+			nuc970_uart_regname(offset),
+			res);
+		break;
+	case UA_RBR:
+		
+		if (fifo_elements_number(&s->rx)) {
+				res = fifo_retrieve(&s->rx);
+				trace_exynos_uart_rx(s->channel, res);
+				if (!fifo_elements_number(&s->rx)) {
+					s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_BUFFER_DATA_READY;
 
-    DPRINTF("read(offset=0x%" HWADDR_PRIx ", value=%08x)\n", offset, res);
+					
+				}
+				else {
+					s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_BUFFER_DATA_READY;
+				}
 
-    return res;
+				s->reg[I_(UA_ISR)] &= ~TOUT_IF;	// clear TOUT_IF
+				s->reg[I_(UA_ISR)] &= ~(1 << 12);	// clear TOUT_INT
+
+				//s->reg[I_(UA_ISR)] &= ~(1);
+				nuc970_uart_update_irq(s);
+		}
+		else {
+				trace_exynos_uart_rx_error(s->channel);
+				s->reg[I_(UINTSP)] |= UINTSP_ERROR;
+				nuc970_uart_update_irq(s);
+				res = 0;
+		}
+		
+		
+
+		qemu_chr_fe_accept_input(&s->chr);
+		//nuc970_uart_update_dmabusy(s);
+		trace_exynos_uart_read(s->channel, offset,
+			nuc970_uart_regname(offset), res);
+		break;
+		//case UTXH:
+		//    trace_exynos_uart_wo_read(s->channel, nuc970_uart_regname(offset),
+		//        offset);
+		//    break;
+	default:
+		trace_exynos_uart_read(s->channel, offset,
+			nuc970_uart_regname(offset),
+			s->reg[I_(offset)]);
+		res = s->reg[I_(offset)];
+		break;
+	}
+
+	trace_exynos_uart_read(s->channel, offset, nuc970_uart_regname(offset),
+		0);
+
+	DPRINTF("read(offset=0x%" HWADDR_PRIx ", value=%08x)\n", offset, res);
+
+	return res;
 }
 
 static const MemoryRegionOps nuc970_uart_ops = {
-    .read = nuc970_uart_read,
-    .write = nuc970_uart_write,
-    .endianness = DEVICE_NATIVE_ENDIAN,
-    .valid = {
-        .max_access_size = 4,
-        .unaligned = false
-    },
+	.read = nuc970_uart_read,
+	.write = nuc970_uart_write,
+	.endianness = DEVICE_NATIVE_ENDIAN,
+	.valid = {
+		.max_access_size = 4,
+		.unaligned = false
+	},
 };
 
 static int nuc970_uart_can_receive(void* opaque)
 {
-    NUC970UartState* s = (NUC970UartState*)opaque;
+	NUC970UartState* s = (NUC970UartState*)opaque;
 
-    //if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
-    if (1) {
-        return fifo_empty_elements_number(&s->rx);
-    }
-    else {
-        return !(s->reg[I_(UTRSTAT)] & UTRSTAT_Rx_BUFFER_DATA_READY);
-    }
+	//if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
+	if (1) {
+		return fifo_empty_elements_number(&s->rx);
+	}
+	else {
+		return !(s->reg[I_(UTRSTAT)] & UTRSTAT_Rx_BUFFER_DATA_READY);
+	}
 }
 
 static void nuc970_uart_receive(void* opaque, const uint8_t* buf, int size)
 {
-    NUC970UartState* s = (NUC970UartState*)opaque;
-    int i;
+	NUC970UartState* s = (NUC970UartState*)opaque;
+	int i;
+	
+		if (fifo_empty_elements_number(&s->rx) < size) {
+			size = fifo_empty_elements_number(&s->rx);
+			s->reg[I_(UINTSP)] |= UINTSP_ERROR;
+		}
+		for (i = 0; i < size; i++) {
+			fifo_store(&s->rx, buf[i]);
+		}
+		DPRINTF("receive(%0x) %d\n", buf[0], size);
+		nuc970_uart_rx_timeout_set(s);
+	
+	//s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_BUFFER_DATA_READY;
 
-    //if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
-    if (1) {
-        if (fifo_empty_elements_number(&s->rx) < size) {
-            size = fifo_empty_elements_number(&s->rx);
-            s->reg[I_(UINTSP)] |= UINTSP_ERROR;
-        }
-        for (i = 0; i < size; i++) {
-            fifo_store(&s->rx, buf[i]);
-        }
-        DPRINTF("receive(%0x) %d\n", buf[0], size);
-        nuc970_uart_rx_timeout_set(s);
-    }
-    else {
-        s->reg[I_(URXH)] = buf[0];
-    }
-    //s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_BUFFER_DATA_READY;
-
-    nuc970_uart_update_irq(s);
+	nuc970_uart_update_irq(s);
 }
 
 
 static void nuc970_uart_event(void* opaque, QEMUChrEvent event)
 {
-    NUC970UartState* s = (NUC970UartState*)opaque;
+	NUC970UartState* s = (NUC970UartState*)opaque;
 
-    if (event == CHR_EVENT_BREAK) {
-        /* When the RxDn is held in logic 0, then a null byte is pushed into the
-         * fifo */
-        fifo_store(&s->rx, '\0');
-        s->reg[I_(UERSTAT)] |= UERSTAT_BREAK;
-        nuc970_uart_update_irq(s);
-    }
+	if (event == CHR_EVENT_BREAK) {
+		/* When the RxDn is held in logic 0, then a null byte is pushed into the
+		 * fifo */
+		fifo_store(&s->rx, '\0');
+		//s->reg[I_(UERSTAT)] |= UERSTAT_BREAK;
+		nuc970_uart_update_irq(s);
+	}
 }
 
 
 static void nuc970_uart_reset(DeviceState* dev)
 {
-    NUC970UartState* s = NUC970_UART(dev);
-    int i;
-    //fprintf(stderr, "*** uart_reset ***\n");
-    for (i = 0; i < ARRAY_SIZE(nuc970_uart_regs); i++) {
-        s->reg[I_(nuc970_uart_regs[i].offset)] =
-            nuc970_uart_regs[i].reset_value;
-    }
+	NUC970UartState* s = NUC970_UART(dev);
+	int i;
+	//fprintf(stderr, "*** uart_reset ***\n");
+	for (i = 0; i < ARRAY_SIZE(nuc970_uart_regs); i++) {
+		s->reg[I_(nuc970_uart_regs[i].offset)] =
+			nuc970_uart_regs[i].reset_value;
+	}
 
-    fifo_reset(&s->rx);
-    fifo_reset(&s->tx);
+	fifo_reset(&s->rx);
+	fifo_reset(&s->tx);
 
-    trace_exynos_uart_rxsize(s->channel, s->rx.size);
+	trace_exynos_uart_rxsize(s->channel, s->rx.size);
 }
 
 static int nuc970_uart_post_load(void* opaque, int version_id)
 {
-    NUC970UartState* s = (NUC970UartState*)opaque;
+	NUC970UartState* s = (NUC970UartState*)opaque;
 
-    nuc970_uart_update_parameters(s);
-    nuc970_uart_rx_timeout_set(s);
+	nuc970_uart_update_parameters(s);
+	nuc970_uart_rx_timeout_set(s);
 
-    return 0;
+	return 0;
 }
 
 static const VMStateDescription vmstate_nuc970_uart_fifo = {
-    .name = "nuc970.uart.fifo",
-    .version_id = 1,
-    .minimum_version_id = 1,
-    .fields = (VMStateField[]) {
-        VMSTATE_UINT32(sp, NUC970UartFIFO),
-        VMSTATE_UINT32(rp, NUC970UartFIFO),
-        VMSTATE_VBUFFER_UINT32(data, NUC970UartFIFO, 1, NULL, size),
-        VMSTATE_END_OF_LIST()
-    }
+	.name = "nuc970.uart.fifo",
+	.version_id = 1,
+	.minimum_version_id = 1,
+	.fields = (VMStateField[]) {
+		VMSTATE_UINT32(sp, NUC970UartFIFO),
+		VMSTATE_UINT32(rp, NUC970UartFIFO),
+		VMSTATE_VBUFFER_UINT32(data, NUC970UartFIFO, 1, NULL, size),
+		VMSTATE_END_OF_LIST()
+	}
 };
 
 static const VMStateDescription vmstate_nuc970_uart = {
-    .name = "nuc970.uart",
-    .version_id = 1,
-    .minimum_version_id = 1,
-    .post_load = nuc970_uart_post_load,
-    .fields = (VMStateField[]) {
-        VMSTATE_STRUCT(rx, NUC970UartState, 1,
-                       vmstate_nuc970_uart_fifo, NUC970UartFIFO),
-        VMSTATE_UINT32_ARRAY(reg, NUC970UartState,
-                             NUC970_UART_REGS_MEM_SIZE / sizeof(uint32_t)),
-        VMSTATE_END_OF_LIST()
-    }
+	.name = "nuc970.uart",
+	.version_id = 1,
+	.minimum_version_id = 1,
+	.post_load = nuc970_uart_post_load,
+	.fields = (VMStateField[]) {
+		VMSTATE_STRUCT(rx, NUC970UartState, 1,
+					   vmstate_nuc970_uart_fifo, NUC970UartFIFO),
+		VMSTATE_UINT32_ARRAY(reg, NUC970UartState,
+							 NUC970_UART_REGS_MEM_SIZE / sizeof(uint32_t)),
+		VMSTATE_END_OF_LIST()
+	}
 };
 
 DeviceState* nuc970_uart_create(hwaddr addr,
-    int fifo_size,
-    int channel,
-    Chardev* chr,
-    qemu_irq irq)
+	int fifo_size,
+	int channel,
+	Chardev* chr,
+	qemu_irq irq)
 {
-    DeviceState* dev;
-    SysBusDevice* bus;
+	DeviceState* dev;
+	SysBusDevice* bus;
 
-    dev = qdev_new(TYPE_NUC970_UART);
+	dev = qdev_new(TYPE_NUC970_UART);
 
-    qdev_prop_set_chr(dev, "chardev", chr);
-    qdev_prop_set_uint32(dev, "channel", channel);
-    qdev_prop_set_uint32(dev, "rx-size", fifo_size);
-    qdev_prop_set_uint32(dev, "tx-size", fifo_size);
+	qdev_prop_set_chr(dev, "chardev", chr);
+	qdev_prop_set_uint32(dev, "channel", channel);
+	qdev_prop_set_uint32(dev, "rx-size", fifo_size);
+	qdev_prop_set_uint32(dev, "tx-size", fifo_size);
 
-    bus = SYS_BUS_DEVICE(dev);
-    sysbus_realize_and_unref(bus, &error_fatal);
-    if (addr != (hwaddr)-1) {
-        sysbus_mmio_map(bus, 0, addr);
-    }
-    sysbus_connect_irq(bus, 0, irq);
+	bus = SYS_BUS_DEVICE(dev);
+	sysbus_realize_and_unref(bus, &error_fatal);
+	if (addr != (hwaddr)-1) {
+		sysbus_mmio_map(bus, 0, addr);
+	}
+	sysbus_connect_irq(bus, 0, irq);
 
-    return dev;
+	return dev;
 }
 
 static void nuc970_uart_init(Object* obj)
 {
-    SysBusDevice* dev = SYS_BUS_DEVICE(obj);
-    NUC970UartState* s = NUC970_UART(dev);
+	SysBusDevice* dev = SYS_BUS_DEVICE(obj);
+	NUC970UartState* s = NUC970_UART(dev);
 
-    s->wordtime = NANOSECONDS_PER_SECOND * 10 / 9600;
+	s->wordtime = NANOSECONDS_PER_SECOND * 10 / 9600;
 
-    /* memory mapping */
-    memory_region_init_io(&s->iomem, obj, &nuc970_uart_ops, s,
-        "nuc970.uart", NUC970_UART_REGS_MEM_SIZE);
-    sysbus_init_mmio(dev, &s->iomem);
+	/* memory mapping */
+	memory_region_init_io(&s->iomem, obj, &nuc970_uart_ops, s,
+		"nuc970.uart", 0x100);
+	sysbus_init_mmio(dev, &s->iomem);
 
-    sysbus_init_irq(dev, &s->irq);
-    sysbus_init_irq(dev, &s->dmairq);
+	sysbus_init_irq(dev, &s->irq);
 }
 
 static void nuc970_uart_realize(DeviceState* dev, Error** errp)
 {
-    NUC970UartState* s = NUC970_UART(dev);
+	NUC970UartState* s = NUC970_UART(dev);
 
-    s->fifo_timeout_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
-        nuc970_uart_timeout_int, s);
+	s->fifo_timeout_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
+		nuc970_uart_timeout_int, s);
 
-    qemu_chr_fe_set_handlers(&s->chr, nuc970_uart_can_receive,
-        nuc970_uart_receive, nuc970_uart_event,
-        NULL, s, NULL, true);
+	qemu_chr_fe_set_handlers(&s->chr, nuc970_uart_can_receive,
+		nuc970_uart_receive, nuc970_uart_event,
+		NULL, s, NULL, true);
 }
 
 static Property nuc970_uart_properties[] = {
-    DEFINE_PROP_CHR("chardev", NUC970UartState, chr),
-    DEFINE_PROP_UINT32("channel", NUC970UartState, channel, 0),
-    DEFINE_PROP_UINT32("rx-size", NUC970UartState, rx.size, 16),
-    DEFINE_PROP_UINT32("tx-size", NUC970UartState, tx.size, 16),
-    DEFINE_PROP_END_OF_LIST(),
+	DEFINE_PROP_CHR("chardev", NUC970UartState, chr),
+	DEFINE_PROP_UINT32("channel", NUC970UartState, channel, 0),
+	DEFINE_PROP_UINT32("rx-size", NUC970UartState, rx.size, 16),
+	DEFINE_PROP_UINT32("tx-size", NUC970UartState, tx.size, 16),
+	DEFINE_PROP_END_OF_LIST(),
 };
 
 static void nuc970_uart_class_init(ObjectClass* klass, void* data)
 {
-    DeviceClass* dc = DEVICE_CLASS(klass);
+	DeviceClass* dc = DEVICE_CLASS(klass);
 
-    dc->realize = nuc970_uart_realize;
-    dc->reset = nuc970_uart_reset;
-    device_class_set_props(dc, nuc970_uart_properties);
-    dc->vmsd = &vmstate_nuc970_uart;
+	dc->realize = nuc970_uart_realize;
+	dc->reset = nuc970_uart_reset;
+	device_class_set_props(dc, nuc970_uart_properties);
+	dc->vmsd = &vmstate_nuc970_uart;
 }
 
 static const TypeInfo nuc970_uart_info = {
-    .name = TYPE_NUC970_UART,
-    .parent = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(NUC970UartState),
-    .instance_init = nuc970_uart_init,
-    .class_init = nuc970_uart_class_init,
+	.name = TYPE_NUC970_UART,
+	.parent = TYPE_SYS_BUS_DEVICE,
+	.instance_size = sizeof(NUC970UartState),
+	.instance_init = nuc970_uart_init,
+	.class_init = nuc970_uart_class_init,
 };
 
 static void nuc970_uart_register(void)
 {
-    type_register_static(&nuc970_uart_info);
+	type_register_static(&nuc970_uart_info);
 }
 
 type_init(nuc970_uart_register)

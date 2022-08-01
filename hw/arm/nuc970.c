@@ -35,10 +35,14 @@
 #include "ui/pixel_ops.h"
 #include "qemu/cutils.h"
 #include "qom/object.h"
+#include "hw/misc/unimp.h"
 #include "hw/net/mv88w8618_eth.h"
 #include "hw/char/nuc970_uart.h"
 #include "hw/intc/nuc970_aic.h"
 #include "hw/timer/nuc970_timer.h"
+#include "hw/net/nuc970_emc.h"
+#include "hw/i2c/nuc970_i2c.h"
+#include "hw/arm/nuc970.h"
 
 #define MP_MISC_BASE            0x80002000
 #define MP_MISC_SIZE            0x00001000
@@ -766,12 +770,7 @@ static const TypeInfo nuc970_misc_info = {
 struct NUC970SysState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
-    uint32_t pdid;      // 00
-    uint32_t pwron;     // 04
-    uint32_t lvrdcr;    // 20
-    
-    uint32_t apbiprst0; // 64
-    uint32_t apbiprst1; // 68
+    uint32_t regs[67];      // 0x0 ~ 0x108
 };
 
 #define TYPE_NUC970_SYS "nuc970-sys"
@@ -783,19 +782,17 @@ static uint64_t nuc970_sys_read(void* opaque, hwaddr offset,
     NUC970SysState* s = (NUC970SysState*)opaque;
     uint32_t r = 0;
     switch (offset) {
+    case 0x1fc:
+        r = 0x00000001;
+        break;
     case 0:
         r = 0x1230D008;
         break;
     case 4:
         r = 0x1F0007D7;
         break;
-    case 0x68:    // APBIPRST1
-        r = s->apbiprst1;
-        break;
-    case 0x1fc:
-        r = 0x00000001;
-        break;
     default:
+        r = s->regs[offset / 4];
         break;
     }
 
@@ -810,10 +807,10 @@ static void nuc970_sys_write(void* opaque, hwaddr offset,
     fprintf(stderr, "sys_write(offset=%lx, value=%08x)\n", offset, value);
     switch (offset)
     {
-    case 0x68:
-        s->apbiprst1 = value;
+    case 0x1fc:
         break;
     default:
+        s->regs[offset / 4] = value;
         break;
     }
 }
@@ -832,7 +829,8 @@ static void nuc970_sys_init(Object* obj)
     memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_sys_ops, s,
         "nuc970-sys", 0x200);
     sysbus_init_mmio(sd, &s->iomem);
-    s->apbiprst1 = 0xffffffff;
+    memset(s->regs, 0, sizeof(s->regs));
+    s->regs[0x68/4] = 0xffffffff;
 }
 
 static const TypeInfo nuc970_sys_info = {
@@ -840,6 +838,85 @@ static const TypeInfo nuc970_sys_info = {
     .parent = TYPE_SYS_BUS_DEVICE,
     .instance_init = nuc970_sys_init,
     .instance_size = sizeof(NUC970SysState),
+};
+
+// WDT
+
+struct NUC970WdtState {
+    SysBusDevice parent_obj;
+    MemoryRegion iomem;
+    /*
+    WDT_CTL WDT_BA + 0x00 R / W WDT Control Register 0x0000_0700
+    WDT_ALTCTL WDT_BA + 0x04 R / W WDT Alternative Control Register 0x0000_0000
+    */
+    uint32_t ctl;      // 00
+    uint32_t altctl;   // 04
+};
+
+#define TYPE_NUC970_WDT "nuc970-wdt"
+OBJECT_DECLARE_SIMPLE_TYPE(NUC970WdtState, NUC970_WDT)
+
+static uint64_t nuc970_wdt_read(void* opaque, hwaddr offset,
+    unsigned size)
+{
+    NUC970WdtState* s = (NUC970WdtState*)opaque;
+    uint32_t r = 0;
+    switch (offset) {
+    case 0:
+        r = s->ctl;
+        break;
+    case 4:
+        r = s->altctl;
+        break;
+    default:
+        break;
+    }
+
+    //fprintf(stderr, "wdt_read(offset=%lx, value=%08x)\n", offset, r);
+    return r;
+}
+
+static void nuc970_wdt_write(void* opaque, hwaddr offset,
+    uint64_t value, unsigned size)
+{
+    NUC970WdtState* s = (NUC970WdtState*)opaque;
+    //fprintf(stderr, "wdt_write(offset=%lx, value=%08x)\n", offset, value);
+    switch (offset)
+    {
+    case 0:
+        s->ctl = value;
+        break;
+    case 4:
+        s->altctl = value;
+        break;
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps nuc970_wdt_ops = {
+    .read = nuc970_wdt_read,
+    .write = nuc970_wdt_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
+static void nuc970_wdt_init(Object* obj)
+{
+    SysBusDevice* sd = SYS_BUS_DEVICE(obj);
+    NUC970WdtState* s = NUC970_WDT(obj);
+
+    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_wdt_ops, s,
+        "nuc970-wdt", 0x100);
+    sysbus_init_mmio(sd, &s->iomem);
+    s->ctl = 0x00000700;
+    s->altctl = 0;
+}
+
+static const TypeInfo nuc970_wdt_info = {
+    .name = TYPE_NUC970_WDT,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_init = nuc970_wdt_init,
+    .instance_size = sizeof(NUC970WdtState),
 };
 
 
@@ -1207,20 +1284,24 @@ static uint64_t nuc970_gpio_read(void* opaque, hwaddr offset,
     unsigned size)
 {
     nuc970_gpio_state* s = opaque;
-
+    uint32_t r = 0;
     //int group = offset / 0x40;
     //int idx = offset % 0x40;
 
     switch (offset) {   
     default:
-        return s->regs[offset / 4];
+        r = s->regs[offset / 4];
+        break;
     }
+    fprintf(stderr, "gpio read %08x = %08x\n", offset, r);
+    return r;
 }
 
 static void nuc970_gpio_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     nuc970_gpio_state* s = opaque;
+    fprintf(stderr, "gpio write %08x = %08x\n", offset, value);
     switch (offset) {
     default:
         s->regs[offset / 4] = value & 0xffff;
@@ -1457,6 +1538,317 @@ static const TypeInfo nuc970_key_info = {
     .class_init = nuc970_key_class_init,
 };
 
+// rtc
+
+struct NUC970RtcState {
+    SysBusDevice parent_obj;
+    MemoryRegion iomem;
+    /*
+    WDT_CTL WDT_BA + 0x00 R / W WDT Control Register 0x0000_0700
+    WDT_ALTCTL WDT_BA + 0x04 R / W WDT Alternative Control Register 0x0000_0000
+    */
+    uint32_t time;     // 0c
+    uint32_t cal;   // 10
+    uint32_t timefmt; // 14
+
+    uint32_t inten; //RTC_BA + 0x028 R / W RTC Interrupt Enable Register 0x0000_0000
+    uint32_t intsts; //RTC_BA + 0x02C
+};
+
+#define TYPE_NUC970_RTC "nuc970-rtc"
+OBJECT_DECLARE_SIMPLE_TYPE(NUC970RtcState, NUC970_RTC)
+
+static uint64_t nuc970_rtc_read(void* opaque, hwaddr offset,
+    unsigned size)
+{
+    NUC970RtcState* s = (NUC970RtcState*)opaque;
+    uint32_t r = 0;
+    switch (offset) {
+    case 0x0c:
+        r = s->time;
+        break;
+    case 0x10:
+        r = s->cal;
+        break;
+    case 0x14:
+        r = s->timefmt;
+        break;
+    case 0x28:
+        r = s->inten;
+        break;
+    case 0x2c:
+        r = s->intsts;
+        break;
+    default:
+        break;
+    }
+
+    //fprintf(stderr, "rtc_read(offset=%lx, value=%08x)\n", offset, r);
+    return r;
+}
+
+static void nuc970_rtc_write(void* opaque, hwaddr offset,
+    uint64_t value, unsigned size)
+{
+    NUC970RtcState* s = (NUC970RtcState*)opaque;
+    //fprintf(stderr, "rtc_write(offset=%lx, value=%08x)\n", offset, value);
+    switch (offset)
+    {
+    case 0x14:
+        s->timefmt = value;
+        break;
+    case 0x28:
+        s->inten = value;
+        break;
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps nuc970_rtc_ops = {
+    .read = nuc970_rtc_read,
+    .write = nuc970_rtc_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
+static void nuc970_rtc_init(Object* obj)
+{
+    SysBusDevice* sd = SYS_BUS_DEVICE(obj);
+    NUC970RtcState* s = NUC970_RTC(obj);
+
+    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_rtc_ops, s,
+        "nuc970-rtc", 0x100);
+    sysbus_init_mmio(sd, &s->iomem);
+    s->time = 0x0;
+    s->cal = 0x00050101;
+    s->timefmt = 0x1;
+    s->inten = 0;
+    s->intsts = 0;
+}
+
+static const TypeInfo nuc970_rtc_info = {
+    .name = TYPE_NUC970_RTC,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_init = nuc970_rtc_init,
+    .instance_size = sizeof(NUC970RtcState),
+};
+
+// fmi
+
+struct NUC970FmiState {
+    SysBusDevice parent_obj;
+    MemoryRegion iomem;
+    uint32_t FMI_CTL;           // 0x800
+    uint32_t FMI_NANDCTL;       // 0x8a0
+    uint32_t FMI_NANDTMCTL;     // 0x8a4
+    uint32_t FMI_NANDINTSTS;    // 0x8ac
+    uint32_t FMI_NANDCMD;       // 0x8b0
+    uint32_t FMI_NANDADDR;      // 0x8b4
+    uint32_t FMI_NANDDATA;      // 0x8b8
+    uint32_t FMI_NANDRACTL;     // 0x8bc
+    uint32_t FMI_NANDECTL;      // 0x8c0
+};
+
+#define TYPE_NUC970_FMI "nuc970-fmi"
+OBJECT_DECLARE_SIMPLE_TYPE(NUC970FmiState, NUC970_FMI)
+
+static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
+    unsigned size)
+{
+    NUC970FmiState* fmi = (NUC970FmiState*)opaque;
+    uint32_t r = 0;
+    switch (offset) {
+    case 0x800: r = fmi->FMI_CTL; break;
+    case 0x8a0:
+        //fprintf(stderr, "FMI_NANDCTL: %08x\n", fmi->FMI_NANDCTL);
+        r = fmi->FMI_NANDCTL & ~(1); // clear SR_RST BIT
+        break;
+    case 0x8a4: r = fmi->FMI_NANDTMCTL; break;
+    case 0x8ac:
+        //fprintf(stderr, "FMI_NANDINTSTS: %08x\n", fmi->FMI_NANDINTSTS);
+        r = fmi->FMI_NANDINTSTS; break;
+    case 0x8b0: r = fmi->FMI_NANDCMD; break;
+    case 0x8b4: r = fmi->FMI_NANDADDR; break;
+    case 0x8b8: r = fmi->FMI_NANDDATA; break;
+    case 0x8bc: r = fmi->FMI_NANDRACTL; break;
+    case 0x8c0: r = fmi->FMI_NANDECTL; break;
+    default: r = 0; break;
+    }
+
+    //fprintf(stderr, "fmi_read(offset=%lx, value=%08x)\n", offset, r);
+    return r;
+}
+
+static void nuc970_fmi_write(void* opaque, hwaddr offset,
+    uint64_t value, unsigned size)
+{
+    NUC970FmiState* fmi = (NUC970FmiState*)opaque;
+    //fprintf(stderr, "fmi_write(offset=%lx, value=%08x)\n", offset, value);
+    switch (offset)
+    {
+    case 0x800:
+        fmi->FMI_CTL = value;
+        break;
+    case 0x8a0:
+        fmi->FMI_NANDCTL = value;
+        break;
+    case 0x8a4:
+        fmi->FMI_NANDTMCTL = value;
+        break;
+    case 0x8ac:
+        fmi->FMI_NANDINTSTS = value;
+        break;
+    case 0x8b0:
+        fmi->FMI_NANDCMD = value;
+        break;
+    case 0x8b4:
+        fmi->FMI_NANDADDR = value;
+        break;
+    case 0x8b8:
+        fmi->FMI_NANDDATA = value;
+        break;
+    case 0x8bc:
+        fmi->FMI_NANDRACTL = value;
+        break;
+    case 0x8c0:
+        fmi->FMI_NANDECTL = value;
+        break;
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps nuc970_fmi_ops = {
+    .read = nuc970_fmi_read,
+    .write = nuc970_fmi_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
+static void nuc970_fmi_init(Object* obj)
+{
+    SysBusDevice* sd = SYS_BUS_DEVICE(obj);
+    NUC970FmiState* fmi = NUC970_FMI(obj);
+
+    memory_region_init_io(&fmi->iomem, OBJECT(fmi), &nuc970_fmi_ops, fmi,
+        "nuc970-fmi", 0x1000);
+    sysbus_init_mmio(sd, &fmi->iomem);
+    fmi->FMI_CTL = 0x0;
+    fmi->FMI_NANDTMCTL = 0x00010105;
+    fmi->FMI_NANDCTL = 0x1E880090;
+    fmi->FMI_NANDINTSTS = 0x00040000;
+    fmi->FMI_NANDCMD = 0x0;
+    fmi->FMI_NANDADDR = 0x0;
+    fmi->FMI_NANDECTL = 0x0;
+}
+
+static const TypeInfo nuc970_fmi_info = {
+    .name = TYPE_NUC970_FMI,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_init = nuc970_fmi_init,
+    .instance_size = sizeof(NUC970FmiState),
+};
+
+// SDH
+
+struct NUC970SdhState {
+    SysBusDevice parent_obj;
+    MemoryRegion iomem;
+    uint32_t SDH_DMACTL;    // 0x400 0x0000_0000
+    uint32_t SDH_GCTL;      // 0x800 0x0000_0000
+    uint32_t SDH_CTL;       // 0x820 0x0101_0000
+    uint32_t SDH_INTEN;     // 0x828 0x0000_0A00
+    uint32_t SDH_INTSTS;    // 0x82c 0x0000_008C
+    uint32_t SDH_ECTL;      // 0x840 0x0000_0003
+};
+
+#define TYPE_NUC970_SDH "nuc970-sdh"
+OBJECT_DECLARE_SIMPLE_TYPE(NUC970SdhState, NUC970_SDH)
+
+static uint64_t nuc970_sdh_read(void* opaque, hwaddr offset,
+    unsigned size)
+{
+    NUC970SdhState* fmi = (NUC970SdhState*)opaque;
+    uint32_t r = 0;
+    switch (offset) {
+    case 0x400: r = fmi->SDH_DMACTL; break;
+    case 0x800: r = fmi->SDH_GCTL; break;
+    case 0x820:
+        //fprintf(stderr, "SDH_CTL: %08x\n", fmi->SDH_CTL);
+        r = fmi->SDH_CTL;
+        r &= ~(1 << 6); // clear CLK8_OE
+        r &= ~(1 << 5); // clear CLK74_OE
+        break;
+    case 0x828:
+        r = fmi->SDH_INTEN; break;
+    case 0x82c: r = fmi->SDH_INTSTS; break;
+    case 0x840: r = fmi->SDH_ECTL; break;
+    default: r = 0; break;
+    }
+
+    fprintf(stderr, "sdh_read(offset=%lx, value=%08x)\n", offset, r);
+    return r;
+}
+
+static void nuc970_sdh_write(void* opaque, hwaddr offset,
+    uint64_t value, unsigned size)
+{
+    NUC970SdhState* fmi = (NUC970SdhState*)opaque;
+    fprintf(stderr, "sdh_write(offset=%lx, value=%08x)\n", offset, value);
+    switch (offset)
+    {
+    case 0x400:
+        fmi->SDH_DMACTL = value;
+        break;
+    case 0x800:
+        fmi->SDH_GCTL = value;
+        break;
+    case 0x820:
+        fmi->SDH_CTL = value;
+        break;
+    case 0x828:
+        fmi->SDH_INTEN = value;
+        break;
+    case 0x82c:
+        fmi->SDH_INTSTS = value;
+        break;
+    case 0x840:
+        fmi->SDH_ECTL = value;
+        break;
+    
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps nuc970_sdh_ops = {
+    .read = nuc970_sdh_read,
+    .write = nuc970_sdh_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
+static void nuc970_sdh_init(Object* obj)
+{
+    SysBusDevice* sd = SYS_BUS_DEVICE(obj);
+    NUC970SdhState* fmi = NUC970_SDH(obj);
+
+    memory_region_init_io(&fmi->iomem, OBJECT(fmi), &nuc970_sdh_ops, fmi,
+        "nuc970-sdh", 0x1000);
+    sysbus_init_mmio(sd, &fmi->iomem);
+    fmi->SDH_DMACTL = 0x00000000;
+    fmi->SDH_GCTL = 0x00000000;
+    fmi->SDH_CTL = 0x01010000;
+    fmi->SDH_INTEN = 0x00000A00;
+    fmi->SDH_INTSTS = 0x0000008C;
+    fmi->SDH_ECTL = 0x00000003;
+}
+
+static const TypeInfo nuc970_sdh_info = {
+    .name = TYPE_NUC970_SDH,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_init = nuc970_sdh_init,
+    .instance_size = 0x1000,// sizeof(NUC970SdhState),
+};
+
 static struct arm_boot_info nuc970_binfo = {
     .loader_start = 0x0,
     .board_id = 0x20e,
@@ -1464,20 +1856,20 @@ static struct arm_boot_info nuc970_binfo = {
 
 /* Register base address for each Timer Module */
 static const hwaddr nuc970_tim_addr[] = {
-    0xB8001000,
-    0xB8001010,
-    0xB8001020,
-    0xB8001030,
-    0xB8001040
+    TMR0_BA,
+    TMR1_BA,
+    TMR2_BA,
+    TMR3_BA,
+    TMR4_BA
 };
 
 /* Register base address for each Timer Module */
 static const int nuc970_tim_irq[] = {
-    16,
-    17,
-    30,
-    31,
-    32
+    TMR0_IRQn,
+    TMR1_IRQn,
+    TMR2_IRQn,
+    TMR3_IRQn,
+    TMR4_IRQn
 };
 
 #define INIT_SHADOW_REGION 1
@@ -1547,7 +1939,7 @@ static void nuc970_init(MachineState* machine)
         qdev_get_gpio_in(pic, MP_TIMER4_IRQ), NULL);
     */
 
-    aic = sysbus_create_simple(TYPE_NUC970_AIC, 0xb8002000, qdev_get_gpio_in(DEVICE(cpu), ARM_CPU_IRQ));
+    aic = sysbus_create_simple(TYPE_NUC970_AIC, AIC_BA, qdev_get_gpio_in(DEVICE(cpu), ARM_CPU_IRQ));
 
     /* Logically OR both UART IRQs together */
 #if 0
@@ -1606,12 +1998,11 @@ static void nuc970_init(MachineState* machine)
 #endif
 
 
-    dev = sysbus_create_simple(TYPE_NUC970_GPIO, MP_GPIO_BASE,
-        qdev_get_gpio_in(aic, MP_GPIO_IRQ));
-#if 0
-    i2c_dev = sysbus_create_simple("gpio_i2c", -1, NULL);
-    i2c = (I2CBus*)qdev_get_child_bus(i2c_dev, "i2c");
+    dev = sysbus_create_simple(TYPE_NUC970_GPIO, GPIO_BA, qdev_get_gpio_in(aic, GPIO_IRQn));
 
+    i2c_dev = sysbus_create_simple(TYPE_NUC970_I2C, I2C0_BA, NULL);
+    i2c = (I2CBus*)qdev_get_child_bus(i2c_dev, "i2c");
+#if 0
     lcd_dev = sysbus_create_simple(TYPE_NUC970_LCD, MP_LCD_BASE, NULL);
     key_dev = sysbus_create_simple(TYPE_NUC970_KEY, -1, NULL);
 
@@ -1643,9 +2034,10 @@ static void nuc970_init(MachineState* machine)
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(pic, MP_AUDIO_IRQ));
 #endif
 
-    sysbus_create_simple(TYPE_NUC970_SYS,  0xb0000000, NULL);
-    sysbus_create_simple(TYPE_NUC970_CLK,  0xb0000200, NULL);
-    sysbus_create_simple(TYPE_NUC970_SDIC, 0xb0001800, NULL);
+    sysbus_create_simple(TYPE_NUC970_SYS, SYS_BA, NULL);
+    sysbus_create_simple(TYPE_NUC970_CLK, CLK_BA, NULL);
+    sysbus_create_simple(TYPE_NUC970_SDIC, SDIC_BA, NULL);
+    sysbus_create_simple(TYPE_NUC970_RTC, RTC_BA, NULL);
 
     {
         //dev = qdev_new(TYPE_NPCM7XX_TIMER);
@@ -1677,10 +2069,16 @@ static void nuc970_init(MachineState* machine)
     }
     
     /*** UARTs ***/
-    uart[0] = nuc970_uart_create(0xb8000000, 64, 0, serial_hd(0),
-        qdev_get_gpio_in(aic, 36));
-    uart[1] = nuc970_uart_create(0xb8000100, 64, 1, serial_hd(1),
-        qdev_get_gpio_in(aic, 37));
+    uart[0] = nuc970_uart_create(UART0_BA, 64, 0, serial_hd(0),
+        qdev_get_gpio_in(aic, UART0_IRQn));
+    uart[1] = nuc970_uart_create(UART1_BA, 64, 1, serial_hd(1),
+        qdev_get_gpio_in(aic, UART1_IRQn));
+
+    nuc970_uart_create(0xb8000500, 64, 5, serial_hd(5), qdev_get_gpio_in(aic, UART5_IRQn));
+    nuc970_uart_create(0xb8000600, 64, 6, serial_hd(6), qdev_get_gpio_in(aic, UART6_IRQn));
+    nuc970_uart_create(0xb8000700, 64, 7, serial_hd(7), qdev_get_gpio_in(aic, UART7_IRQn));
+    nuc970_uart_create(0xb8000800, 64, 8, serial_hd(8), qdev_get_gpio_in(aic, UART8_IRQn));
+    nuc970_uart_create(0xb8000a00, 64, 10, serial_hd(10), qdev_get_gpio_in(aic, UART10_IRQn));
 
     /*** SPI ***/
     dev = qdev_new("nuc970-spi");
@@ -1689,9 +2087,36 @@ static void nuc970_init(MachineState* machine)
     s = SYS_BUS_DEVICE(dev);
 
     sysbus_realize(s, &error_abort);
-    sysbus_mmio_map(s, 0, 0xb8006200);
-    
+    sysbus_mmio_map(s, 0, SPI0_BA);
 
+    sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, SPI0_IRQn));
+    
+    sysbus_create_simple(TYPE_NUC970_WDT, 0xb8001800, NULL);
+    sysbus_create_simple("nuc970.rng", 0xb000f000, NULL);
+    sysbus_create_simple(TYPE_NUC970_FMI, 0xb000d000, NULL);
+
+    dev = qdev_new(TYPE_NPCM7XX_EMC);
+    s = SYS_BUS_DEVICE(dev);
+    if (nd_table[0].used) {
+        qemu_check_nic_model(&nd_table[0], TYPE_NPCM7XX_EMC);
+        qdev_set_nic_properties(DEVICE(s), &nd_table[0]);
+    }
+    /*
+     * The device exists regardless of whether it's connected to a QEMU
+     * netdev backend. So always instantiate it even if there is no
+     * backend.
+     */
+    sysbus_realize(s, &error_abort);
+    sysbus_mmio_map(s, 0, EMC0_BA);
+    //int tx_irq = i == 0 ? NPCM7XX_EMC1TX_IRQ : NPCM7XX_EMC2TX_IRQ;
+    //int rx_irq = i == 0 ? NPCM7XX_EMC1RX_IRQ : NPCM7XX_EMC2RX_IRQ;
+    /*
+     * N.B. The values for the second argument sysbus_connect_irq are
+     * chosen to match the registration order in npcm7xx_emc_realize.
+     */
+    sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, EMC0_TX_IRQn));
+    sysbus_connect_irq(s, 1, qdev_get_gpio_in(aic, EMC0_RX_IRQn));
+    
 
     // test shadow memory region
     /*
@@ -1702,11 +2127,30 @@ static void nuc970_init(MachineState* machine)
     address_space_stl_notdirty(as, 0xbc000004, 0x89abcdef, MEMTXATTRS_UNSPECIFIED, NULL);
     */
 
-    /* If the user specified a -bios image, we put it to 0 and bypass
+    //create_unimplemented_device("nuc970.i2c0", 0xb8006000, 0x100);
+    //create_unimplemented_device("nuc970.sdh", 0xb000c000, 0x1000);
+    sysbus_create_simple(TYPE_NUC970_SDH, SDH_BA, NULL);
+    create_unimplemented_device("nuc970.gdma", 0xb0004000, 0x1000);
+    create_unimplemented_device("nuc970.ebi", EBI_BA, 0x800);
+    create_unimplemented_device("nuc970.emc1", EMC1_BA, 0x1000);
+    create_unimplemented_device("nuc970.ehci", USBH_BA, 0x1000);
+    create_unimplemented_device("nuc970.usbd", USBD_BA, 0x1000);
+    create_unimplemented_device("nuc970.ohci", USBO_BA, 0x1000);
+    create_unimplemented_device("nuc970.lcd", LCM_BA, 0x1000);
+    create_unimplemented_device("nuc970.i2s", ACTL_BA, 0x1000);
+    create_unimplemented_device("nuc970.jpeg", JPEG_BA, 0x1000);
+    create_unimplemented_device("nuc970.ge2d", GE_BA, 0x1000);
+    create_unimplemented_device("nuc970.cap", CAP_BA, 0x1000);
+    create_unimplemented_device("nuc970.etimer0", ETMR0_BA, 0x100);
+    create_unimplemented_device("nuc970.etimer1", ETMR1_BA, 0x100);
+    create_unimplemented_device("nuc970.etimer2", ETMR2_BA, 0x100);
+    create_unimplemented_device("nuc970.etimer3", ETMR3_BA, 0x100);
+
+    /* If the user specified a -bios image, we put it to 0xe00000 and bypass
      * the normal Linux boot process. 
      */
     if (machine->firmware) {
-        hwaddr firmware_addr = 0x0;
+        hwaddr firmware_addr = 0xe00000;
         /* load the firmware image */
         int r = load_image_targphys(machine->firmware, firmware_addr,
             MP_RAM_DEFAULT_SIZE - firmware_addr);
@@ -1764,6 +2208,10 @@ static void nuc970_register_types(void)
     type_register_static(&nuc970_sys_info);
     type_register_static(&nuc970_sdic_info);
     type_register_static(&nuc970_clk_info);
+    type_register_static(&nuc970_wdt_info);
+    type_register_static(&nuc970_rtc_info);
+    type_register_static(&nuc970_fmi_info);
+    type_register_static(&nuc970_sdh_info);
 }
 
 type_init(nuc970_register_types)
