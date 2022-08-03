@@ -152,6 +152,7 @@ static int64_t npcm7xx_timer_count_to_ns(NPCM7xxTimer* t, uint32_t count)
      * result right by 32.
      */
     //12 MHz = 83.333333333333 ns(p)
+    //clock->period: 4294967296 × 83.3333333333333 = 357,913,941,333
     mulu64(&ns_low, &ns_high, t->ctrl->clock->period, ticks);
     if (ns_high & MAKE_64BIT_MASK(31, 33)) {
         return INT64_MAX;
@@ -669,7 +670,7 @@ static void npcm7xx_timer_init(Object* obj)
 
     //clock_update_hz(s->clock, 12 * 1000 * 1000); /* 12MHz */
     clock_set_hz(s->clock, 12 * 1000 * 1000);
-    info_report(" NUC970 Timer clock period %lld\n", s->clock->period);
+    info_report("NUC970 Timer clock period %lld\n", s->clock->period);
 }
 
 static const VMStateDescription vmstate_npcm7xx_base_timer = {

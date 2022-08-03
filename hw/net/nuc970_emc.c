@@ -290,7 +290,7 @@ static void emc_reset(NPCM7xxEMCState* emc)
     emc->tx_active = false;
     emc->rx_active = false;
 
-    emc->phy_num = 0;
+    emc->phy_num = 1;
 }
 
 static void npcm7xx_emc_reset(DeviceState* dev)

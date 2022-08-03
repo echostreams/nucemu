@@ -369,7 +369,7 @@ static void nuc970_spi_realize(DeviceState* dev, Error** errp)
     qdev_init_gpio_out_named(DEVICE(s), s->cs_lines, "cs", s->num_cs);
 
     memory_region_init_io(&s->mmio, OBJECT(s), &spi_ops, s,
-        "nuc970-spi", 11 * 4);
+        "nuc970-spi", 0x100);
     sysbus_init_mmio(sbd, &s->mmio);
 
     s->irqline = -1;

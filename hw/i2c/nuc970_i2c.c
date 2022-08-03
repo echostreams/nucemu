@@ -8,9 +8,12 @@
 #include "hw/i2c/i2c.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
+#include "qemu/units.h"
+#include "qapi/error.h"
+#include "sysemu/blockdev.h"
 
 #ifndef DEBUG_NUC970_I2C
-#define DEBUG_NUC970_I2C 0
+#define DEBUG_NUC970_I2C 1
 #endif
 
 #define DPRINTF(fmt, args...) \
@@ -24,16 +27,18 @@
 static const char* imx_i2c_get_regname(unsigned offset)
 {
     switch (offset) {
-    case IADR_ADDR:
-        return "IADR";
-    case IFDR_ADDR:
-        return "IFDR";
-    case I2CR_ADDR:
-        return "I2CR";
-    case I2SR_ADDR:
-        return "I2SR";
-    case I2DR_ADDR:
-        return "I2DR";
+    case I2C_CSR:
+        return "I2C_CSR";
+    case I2C_DIVIDER:
+        return "I2C_DIVIDER";
+    case I2C_CMDR:
+        return "I2C_CMDR";
+    case I2C_SWR:
+        return "I2C_SWR";
+    case I2C_RxR:
+        return "I2C_RxR";
+    case I2C_TxR:
+        return "I2C_TxR";
     default:
         return "[?]";
     }
@@ -111,21 +116,6 @@ static uint64_t imx_i2c_read(void* opaque, hwaddr offset,
     case I2C_TxR:
         value = s->txr;
 
-        if (imx_i2c_is_master(s)) {
-            uint8_t ret = 0xff;
-
-            {
-                /* get the next byte */
-                ret = i2c_recv(s->bus);
-                imx_i2c_raise_interrupt(s);
-            }
-
-            s->rxr = ret;
-        }
-        else {
-            qemu_log_mask(LOG_UNIMP, "[%s]%s: slave mode not implemented\n",
-                TYPE_NUC970_I2C, __func__);
-        }
         break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "[%s]%s: Bad address at offset 0x%"
@@ -134,7 +124,7 @@ static uint64_t imx_i2c_read(void* opaque, hwaddr offset,
         break;
     }
 
-    DPRINTF("read %s [0x%" HWADDR_PRIx "] -> 0x%02x\n",
+    DPRINTF("read  %s [0x%" HWADDR_PRIx "] -> 0x%02x\n",
         imx_i2c_get_regname(offset), offset, value);
 
     return (uint64_t)value;
@@ -158,28 +148,55 @@ static void imx_i2c_write(void* opaque, hwaddr offset,
         if ((value & I2SR_IIF)) {
             s->csr &= ~I2SR_IIF;
             qemu_irq_lower(s->irq);
-        }
-
-        
+        }        
 
         break;
     case I2C_DIVIDER:
         s->divider = value;
         break;
     case I2C_CMDR:
-        //
+        if (!imx_i2c_is_enabled(s)) {
+            break;
+        }
+        if ((value & I2C_CMD_START) && 
+            (value & I2C_CMD_WRITE)) {
+            if (i2c_start_transfer(s->bus, extract32(s->txr, 1, 7),
+                extract32(s->txr, 0, 1))) {
+                /* if non zero is returned, the address is not valid */
+                s->csr |= (1 << 11);
+            }
+            else {
+                
+                s->csr &= ~(1 << 11);
+                imx_i2c_raise_interrupt(s);
+            }
+        }
+        else if (value & I2C_CMD_WRITE) { /* This is a normal data write */
+            if (i2c_send(s->bus, s->txr)) {
+                /* if the target return non zero then end the transfer */
+                s->csr |= (1<<11);
+                i2c_end_transfer(s->bus);
+            }
+            else {
+                s->csr &= ~(1<<11);
+                imx_i2c_raise_interrupt(s);
+            }
+        }
+        else if (value & I2C_CMD_READ) {
+            s->rxr = i2c_recv(s->bus);
+
+            imx_i2c_raise_interrupt(s);
+        }
         break;
     case I2C_SWR:
         //
-        break;
-    case I2C_RxR:
         break;
     case I2C_TxR:
         /* if the device is not enabled, nothing to do */
         if (!imx_i2c_is_enabled(s)) {
             break;
         }
-
+        s->txr = value;
         break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "[%s]%s: Bad address at offset 0x%"
@@ -216,10 +233,23 @@ static void imx_i2c_realize(DeviceState* dev, Error** errp)
     NUC970I2CState* s = NUC970_I2C(dev);
 
     memory_region_init_io(&s->iomem, OBJECT(s), &imx_i2c_ops, s, TYPE_NUC970_I2C,
-        NUC970_I2C_MEM_SIZE);
+        0x100);
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
     sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq);
     s->bus = i2c_init_bus(dev, NULL);
+
+    I2CSlave* i2c_dev = i2c_slave_new("at24c-eeprom", 0x50);
+    
+
+    DriveInfo* dinfo = drive_get_by_index(IF_NONE, 0);
+    BlockBackend* blk = dinfo ? blk_by_legacy_dinfo(dinfo) : NULL;
+    if (blk) {
+        qdev_prop_set_drive(DEVICE(i2c_dev), "drive", blk);
+    }
+    qdev_prop_set_uint32(DEVICE(i2c_dev), "rom-size", 2 * KiB);
+
+    i2c_slave_realize_and_unref(i2c_dev, s->bus, &error_abort);
+
 }
 
 static void imx_i2c_class_init(ObjectClass* klass, void* data)

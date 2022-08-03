@@ -291,8 +291,8 @@ static void fifo_reset(NUC970UartFIFO* q)
  * 1/2/4/6/8/10 High-speed
  */
 
-int FCR_HIGH_TRI_LEV[16] = { 1, /*1*/4, 8, 14, 30, 46, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62 };
-int FCR_NORM_TRI_LEV[16] = { 1, /*1*/4, 8, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14 };
+int FCR_HIGH_TRI_LEV[16] = { 1, 4, 8, 14, 30, 46, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62 };
+int FCR_NORM_TRI_LEV[16] = { 1, 4, 8, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14 };
 
 static uint32_t nuc970_uart_FIFO_trigger_level(uint32_t channel,
 	uint32_t reg)
@@ -543,7 +543,7 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
 		break;
 	case UA_FCR:
 		s->reg[I_(UA_FCR)] = val;
-		fprintf(stderr, "  UA_FCR: %lx\n", val);
+		fprintf(stderr, "  UA_FCR[%d]: %lx\n", s->channel, val);
 		if (val & UFCON_Rx_FIFO_RESET) {
 			fifo_reset(&s->rx);
 			s->reg[I_(UA_FCR)] &= ~UFCON_Rx_FIFO_RESET;

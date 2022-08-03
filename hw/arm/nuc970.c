@@ -36,6 +36,7 @@
 #include "qemu/cutils.h"
 #include "qom/object.h"
 #include "hw/misc/unimp.h"
+#include "qemu/units.h"
 #include "hw/net/mv88w8618_eth.h"
 #include "hw/char/nuc970_uart.h"
 #include "hw/intc/nuc970_aic.h"
@@ -43,6 +44,8 @@
 #include "hw/net/nuc970_emc.h"
 #include "hw/i2c/nuc970_i2c.h"
 #include "hw/arm/nuc970.h"
+#include "hw/sd/sd.h"
+#include "hw/sd/sdhci.h"
 
 #define MP_MISC_BASE            0x80002000
 #define MP_MISC_SIZE            0x00001000
@@ -126,7 +129,18 @@ struct nuc970_lcd_state {
     uint32_t page;
     uint32_t page_off;
     QemuConsole* con;
-    uint8_t video_ram[128 * 64 / 8];
+    //uint8_t video_ram[128 * 64 / 8];
+    uint8_t video_ram[800 * 480 * 2];
+
+    uint32_t crtc_size; // CRTC_SIZE
+    uint32_t crtc_dend; // CRTC_DEND
+
+    uint32_t va_baddr0; // VA_BADDR0
+    uint32_t va_baddr1; // VA_BADDR1
+    uint32_t osd_wins;  // starting coordinates register
+    uint32_t osd_wine;  // ending coordinates register
+
+    
 };
 
 static uint8_t scale_lcd_color(nuc970_lcd_state* s, uint8_t col)
@@ -160,22 +174,33 @@ static void lcd_refresh(void* opaque)
 {
     nuc970_lcd_state* s = opaque;
     int x, y, col;
+    DisplaySurface* surface = qemu_console_surface(s->con);
+    uint8_t* data_display;
+    data_display = surface_data(surface);
 
     col = rgb_to_pixel32(scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 16) & 0xff),
         scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 8) & 0xff),
         scale_lcd_color(s, MP_LCD_TEXTCOLOR & 0xff));
-    for (x = 0; x < 128; x++) {
-        for (y = 0; y < 64; y++) {
-            if (s->video_ram[x + (y / 8) * 128] & (1 << (y % 8))) {
-                set_lcd_pixel32(s, x, y, col);
-            }
-            else {
-                set_lcd_pixel32(s, x, y, 0);
-            }
+
+    dma_memory_read(&address_space_memory, s->va_baddr0, s->video_ram, sizeof(s->video_ram), MEMTXATTRS_UNSPECIFIED);
+
+    for (y = 0; y < 480; y++) {
+        for (x = 0; x < 800; x++, data_display += 4) {
+            uint16_t color = 
+                s->video_ram[y * 800 * 2 + x * 2] | 
+                s->video_ram[y * 800 * 2 + x * 2 + 1] << 8;
+        
+            uint8_t r = ((color >> 11) & 0x1F);
+            uint8_t g = ((color >> 5) & 0x3F);
+            uint8_t b = (color & 0x1F);
+
+            uint32_t dest_color = rgb_to_pixel32(r, g, b);
+            *(uint32_t*)data_display = dest_color;
+
         }
     }
 
-    dpy_gfx_update(s->con, 0, 0, 128 * 3, 64 * 3);
+    dpy_gfx_update(s->con, 0, 0, 800, 480);
 }
 
 static void lcd_invalidate(void* opaque)
@@ -207,8 +232,32 @@ static void nuc970_lcd_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     nuc970_lcd_state* s = opaque;
+    fprintf(stderr, "lcd_write: %08x %lx\n", offset, value);
 
     switch (offset) {
+    case 0x10:
+        s->crtc_size = value;
+        break;
+    case 0x14:
+        s->crtc_dend = value;
+
+        qemu_console_resize(s->con, (value & 0x7ff),  ((value >> 16) & 0x7ff));
+
+        break;
+    case 0x24:
+        s->va_baddr0 = value;
+        break;
+    case 0x28:
+        s->va_baddr1 = value;
+        break;
+    case 0x40:
+        s->osd_wins = value;
+        break;
+    case 0x44:
+        s->osd_wine = value;
+        break;
+        
+
     case MP_LCD_IRQCTRL:
         s->irqctrl = value;
         break;
@@ -260,7 +309,7 @@ static void nuc970_lcd_realize(DeviceState* dev, Error** errp)
 {
     nuc970_lcd_state* s = NUC970_LCD(dev);
     s->con = graphic_console_init(dev, 0, &nuc970_gfx_ops, s);
-    qemu_console_resize(s->con, 128 * 3, 64 * 3);
+    qemu_console_resize(s->con, 800, 480);
 }
 
 static void nuc970_lcd_init(Object* obj)
@@ -272,7 +321,7 @@ static void nuc970_lcd_init(Object* obj)
     s->brightness = 7;
 
     memory_region_init_io(&s->iomem, obj, &nuc970_lcd_ops, s,
-        "nuc970-lcd", MP_LCD_SIZE);
+        "nuc970-lcd", 0x1000);
     sysbus_init_mmio(sbd, &s->iomem);
 
     qdev_init_gpio_in(dev, nuc970_lcd_gpio_brightness_in, 3);
@@ -796,7 +845,7 @@ static uint64_t nuc970_sys_read(void* opaque, hwaddr offset,
         break;
     }
 
-    fprintf(stderr, "sys_read(offset=%lx, value=%08x)\n", offset, r);
+    //fprintf(stderr, "sys_read(offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -804,7 +853,7 @@ static void nuc970_sys_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970SysState* s = (NUC970SysState*)opaque;
-    fprintf(stderr, "sys_write(offset=%lx, value=%08x)\n", offset, value);
+    //fprintf(stderr, "sys_write(offset=%lx, value=%08x)\n", offset, value);
     switch (offset)
     {
     case 0x1fc:
@@ -863,7 +912,7 @@ static uint64_t nuc970_wdt_read(void* opaque, hwaddr offset,
     uint32_t r = 0;
     switch (offset) {
     case 0:
-        r = s->ctl;
+        r = s->ctl & ~(0x01);   // clear RSTCNT
         break;
     case 4:
         r = s->altctl;
@@ -1617,7 +1666,7 @@ static void nuc970_rtc_init(Object* obj)
     NUC970RtcState* s = NUC970_RTC(obj);
 
     memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_rtc_ops, s,
-        "nuc970-rtc", 0x100);
+        "nuc970-rtc", 0x1000);
     sysbus_init_mmio(sd, &s->iomem);
     s->time = 0x0;
     s->cal = 0x00050101;
@@ -1748,21 +1797,103 @@ static const TypeInfo nuc970_fmi_info = {
     .instance_size = sizeof(NUC970FmiState),
 };
 
-// SDH
+// SDH : Secure Digital Host Controller
 
 struct NUC970SdhState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
+    
+    /** Memory region where DMA transfers are done */
+    MemoryRegion* dma_mr;
+
+    /** Address space used internally for DMA transfers */
+    AddressSpace dma_as;
+
+    /** Number of bytes left in current DMA transfer */
+    uint32_t transfer_cnt;
+
+    qemu_irq irq;
+    BlockBackend* blk;
+    SDBus sdbus;
+
+    uint32_t SDH_FB[32];    //
     uint32_t SDH_DMACTL;    // 0x400 0x0000_0000
+    uint32_t SDH_DMASA;
+    uint32_t SDH_DMABCNT;
+    uint32_t SDH_DMAINTEN;
+    uint32_t SDH_DMAINTSTS;
+
     uint32_t SDH_GCTL;      // 0x800 0x0000_0000
+    uint32_t SDH_GINTEN;
+    uint32_t SDH_GINTSTS;
     uint32_t SDH_CTL;       // 0x820 0x0101_0000
+    uint32_t SDH_CMD;
     uint32_t SDH_INTEN;     // 0x828 0x0000_0A00
     uint32_t SDH_INTSTS;    // 0x82c 0x0000_008C
+    uint32_t SDH_RESP0;
+    uint32_t SDH_RESP1;
+    uint32_t SDH_BLEN;
+    uint32_t SDH_TMOUT;
     uint32_t SDH_ECTL;      // 0x840 0x0000_0003
 };
 
 #define TYPE_NUC970_SDH "nuc970-sdh"
 OBJECT_DECLARE_SIMPLE_TYPE(NUC970SdhState, NUC970_SDH)
+
+static void nuc970_sdhost_send_command(NUC970SdhState* s)
+{
+    SDRequest request;
+    uint8_t resp[16];
+    int rlen;
+
+    /* Auto clear load flag */
+    //s->command &= ~SD_CMDR_LOAD;
+
+    /* Clock change does not actually interact with the SD bus */
+    //if (!(s->command & SD_CMDR_CLKCHANGE)) 
+    {
+
+        /* Prepare request */
+        request.cmd = (s->SDH_CTL >> 8) & 0x3f;
+        request.arg = s->SDH_CMD;
+
+        /* Send request to SD bus */
+        rlen = sdbus_do_command(&s->sdbus, &request, resp);
+        fprintf(stderr, "sdbus_do_command: %d %x\n", rlen, resp[0]);
+        if (rlen < 0) {
+            //goto error;
+        }
+
+        /* If the command has a response, store it in the response registers */
+        if ((s->SDH_CTL & (1 << 1))) {
+            s->SDH_RESP0 = ldl_be_p(&resp[0]);
+            /*
+            if (rlen == 4 && !(s->command & SD_CMDR_RESPONSE_LONG)) {
+                s->response[0] = ldl_be_p(&resp[0]);
+                s->response[1] = s->response[2] = s->response[3] = 0;
+
+            }
+            else if (rlen == 16 && (s->command & SD_CMDR_RESPONSE_LONG)) {
+                s->response[0] = ldl_be_p(&resp[12]);
+                s->response[1] = ldl_be_p(&resp[8]);
+                s->response[2] = ldl_be_p(&resp[4]);
+                s->response[3] = ldl_be_p(&resp[0]);
+            }
+            else {
+                goto error;
+            }
+            */
+        }
+    }
+
+    /* Set interrupt status bits */
+    //s->irq_status |= SD_RISR_CMD_COMPLETE;
+    return;
+
+//error:
+    //s->irq_status |= SD_RISR_NO_RESPONSE;
+}
+
 
 static uint64_t nuc970_sdh_read(void* opaque, hwaddr offset,
     unsigned size)
@@ -1770,18 +1901,21 @@ static uint64_t nuc970_sdh_read(void* opaque, hwaddr offset,
     NUC970SdhState* fmi = (NUC970SdhState*)opaque;
     uint32_t r = 0;
     switch (offset) {
-    case 0x400: r = fmi->SDH_DMACTL; break;
-    case 0x800: r = fmi->SDH_GCTL; break;
+    case 0x400: r = fmi->SDH_DMACTL & ~(1<<1); break;
+    case 0x800: r = fmi->SDH_GCTL & ~(1<<0); break;
     case 0x820:
         //fprintf(stderr, "SDH_CTL: %08x\n", fmi->SDH_CTL);
         r = fmi->SDH_CTL;
-        r &= ~(1 << 6); // clear CLK8_OE
-        r &= ~(1 << 5); // clear CLK74_OE
+        //r &= ~(1 << 6); // clear CLK8_OE
+        //r &= ~(1 << 5); // clear CLK74_OE
+        //r &= ~(1 << 14);
+        r &= ~(0x407f);
         break;
-    case 0x828:
-        r = fmi->SDH_INTEN; break;
-    case 0x82c: r = fmi->SDH_INTSTS; break;
+    case 0x828: r = fmi->SDH_INTEN; break;
+    case 0x82c: r = fmi->SDH_INTSTS | (1 << 2); break;
+    case 0x830: r = fmi->SDH_RESP0; break;
     case 0x840: r = fmi->SDH_ECTL; break;
+    
     default: r = 0; break;
     }
 
@@ -1792,27 +1926,32 @@ static uint64_t nuc970_sdh_read(void* opaque, hwaddr offset,
 static void nuc970_sdh_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
-    NUC970SdhState* fmi = (NUC970SdhState*)opaque;
+    NUC970SdhState* sdh = (NUC970SdhState*)opaque;
     fprintf(stderr, "sdh_write(offset=%lx, value=%08x)\n", offset, value);
     switch (offset)
     {
     case 0x400:
-        fmi->SDH_DMACTL = value;
+        sdh->SDH_DMACTL = value;
         break;
     case 0x800:
-        fmi->SDH_GCTL = value;
+        sdh->SDH_GCTL = value;
         break;
     case 0x820:
-        fmi->SDH_CTL = value;
+        sdh->SDH_CTL = value;
+        fprintf(stderr, "CMD_CODE: %02x\n", (value >> 8) & 0x3f);
+        if ((value & 0x01) && (value & 0x02))
+        {
+            nuc970_sdhost_send_command(sdh);
+        }
         break;
     case 0x828:
-        fmi->SDH_INTEN = value;
+        sdh->SDH_INTEN = value;
         break;
     case 0x82c:
-        fmi->SDH_INTSTS = value;
+        sdh->SDH_INTSTS = value;
         break;
     case 0x840:
-        fmi->SDH_ECTL = value;
+        sdh->SDH_ECTL = value;
         break;
     
     default:
@@ -1830,23 +1969,87 @@ static void nuc970_sdh_init(Object* obj)
 {
     SysBusDevice* sd = SYS_BUS_DEVICE(obj);
     NUC970SdhState* fmi = NUC970_SDH(obj);
+    DriveInfo* di;
+    BlockBackend* blk;
+    DeviceState* carddev;
 
     memory_region_init_io(&fmi->iomem, OBJECT(fmi), &nuc970_sdh_ops, fmi,
         "nuc970-sdh", 0x1000);
     sysbus_init_mmio(sd, &fmi->iomem);
+
+    sysbus_init_irq(sd, &fmi->irq);
+
+    qbus_init(&fmi->sdbus, sizeof(fmi->sdbus), TYPE_SD_BUS, 
+        DEVICE(sd), "sd-bus");
+
+    /* Retrieve SD bus */
+    di = drive_get(IF_SD, 0, 0);
+    blk = di ? blk_by_legacy_dinfo(di) : NULL;
+
+    /* Plug in SD card */
+    carddev = qdev_new(TYPE_SD_CARD);
+    qdev_prop_set_drive_err(carddev, "drive", blk, &error_fatal);
+    qdev_realize_and_unref(carddev, &fmi->sdbus, &error_fatal);
+
     fmi->SDH_DMACTL = 0x00000000;
     fmi->SDH_GCTL = 0x00000000;
     fmi->SDH_CTL = 0x01010000;
     fmi->SDH_INTEN = 0x00000A00;
     fmi->SDH_INTSTS = 0x0000008C;
     fmi->SDH_ECTL = 0x00000003;
+
+    /*
+# devmem 0xb000c000
+0x000081A4
+# devmem 0xb000c004
+0x00003CCF
+# devmem 0xb000c008
+0x41D60995
+
+# devmem 0xb000c400
+0x00000001
+# devmem 0xb000c408
+0x03A80400
+# devmem 0xb000c40c
+0x00000000
+# devmem 0xb000c410
+0x00000001
+# devmem 0xb000c414
+0x00000000
+# devmem 0xb000c418
+0x00000300
+# devmem 0xb000c800
+0x00000002
+# devmem 0xb000c804
+0x00000001
+# devmem 0xb000c808
+0x00000000
+# devmem 0xb000c820
+0x09018D80
+# devmem 0xb000c824
+0x00010000
+# devmem 0xb000c828
+0x40000100
+# devmem 0xb000c82c
+0x013E00AC
+# devmem 0xb000c830
+0x0D000009
+# devmem 0xb000c834
+0x00000000
+# devmem 0xb000c838
+0x000001FF
+# devmem 0xb000c83c
+0x0000FFFF
+# devmem 0xb000c840
+0x00000000
+    */
 }
 
 static const TypeInfo nuc970_sdh_info = {
     .name = TYPE_NUC970_SDH,
     .parent = TYPE_SYS_BUS_DEVICE,
     .instance_init = nuc970_sdh_init,
-    .instance_size = 0x1000,// sizeof(NUC970SdhState),
+    .instance_size = sizeof(NUC970SdhState),
 };
 
 static struct arm_boot_info nuc970_binfo = {
@@ -1874,8 +2077,14 @@ static const int nuc970_tim_irq[] = {
 
 #define INIT_SHADOW_REGION 1
 
-void nuc970_connect_flash(DeviceState* dev, int cs_no,
-    const char* flash_type, DriveInfo* dinfo);
+static void nuc970_eeprom_init(I2CBus* bus, uint8_t addr, uint32_t rsize)
+{
+    I2CSlave* i2c_dev = i2c_slave_new("at24c-eeprom", addr);
+    DeviceState* dev = DEVICE(i2c_dev);
+
+    qdev_prop_set_uint32(dev, "rom-size", rsize);
+    i2c_slave_realize_and_unref(i2c_dev, bus, &error_abort);
+}
 
 static void nuc970_init(MachineState* machine)
 {
@@ -2001,9 +2210,15 @@ static void nuc970_init(MachineState* machine)
     dev = sysbus_create_simple(TYPE_NUC970_GPIO, GPIO_BA, qdev_get_gpio_in(aic, GPIO_IRQn));
 
     i2c_dev = sysbus_create_simple(TYPE_NUC970_I2C, I2C0_BA, NULL);
-    i2c = (I2CBus*)qdev_get_child_bus(i2c_dev, "i2c");
+    //i2c = (I2CBus*)qdev_get_child_bus(i2c_dev, "i2c");
+
+    s = SYS_BUS_DEVICE(i2c_dev);
+    sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, I2C0_IRQn));
+
+    //nuc970_eeprom_init(i2c, 0x50, 32 * KiB);
+
+    lcd_dev = sysbus_create_simple(TYPE_NUC970_LCD, LCM_BA, NULL);
 #if 0
-    lcd_dev = sysbus_create_simple(TYPE_NUC970_LCD, MP_LCD_BASE, NULL);
     key_dev = sysbus_create_simple(TYPE_NUC970_KEY, -1, NULL);
 
     /* I2C read data */
@@ -2061,10 +2276,8 @@ static void nuc970_init(MachineState* machine)
                 //qemu_irq irq = npcm7xx_irq(s, first_irq + j);
                 //sysbus_connect_irq(sbd, j, irq);
                 sysbus_connect_irq(sbd, j, qdev_get_gpio_in(aic, nuc970_tim_irq[j]));
-            }
-            
-
-            
+            }         
+                        
         }
     }
     
@@ -2127,16 +2340,15 @@ static void nuc970_init(MachineState* machine)
     address_space_stl_notdirty(as, 0xbc000004, 0x89abcdef, MEMTXATTRS_UNSPECIFIED, NULL);
     */
 
-    //create_unimplemented_device("nuc970.i2c0", 0xb8006000, 0x100);
-    //create_unimplemented_device("nuc970.sdh", 0xb000c000, 0x1000);
+    
     sysbus_create_simple(TYPE_NUC970_SDH, SDH_BA, NULL);
-    create_unimplemented_device("nuc970.gdma", 0xb0004000, 0x1000);
+    
+    create_unimplemented_device("nuc970.gdma", GDMA_BA, 0x1000);
     create_unimplemented_device("nuc970.ebi", EBI_BA, 0x800);
     create_unimplemented_device("nuc970.emc1", EMC1_BA, 0x1000);
     create_unimplemented_device("nuc970.ehci", USBH_BA, 0x1000);
     create_unimplemented_device("nuc970.usbd", USBD_BA, 0x1000);
     create_unimplemented_device("nuc970.ohci", USBO_BA, 0x1000);
-    create_unimplemented_device("nuc970.lcd", LCM_BA, 0x1000);
     create_unimplemented_device("nuc970.i2s", ACTL_BA, 0x1000);
     create_unimplemented_device("nuc970.jpeg", JPEG_BA, 0x1000);
     create_unimplemented_device("nuc970.ge2d", GE_BA, 0x1000);
@@ -2145,6 +2357,17 @@ static void nuc970_init(MachineState* machine)
     create_unimplemented_device("nuc970.etimer1", ETMR1_BA, 0x100);
     create_unimplemented_device("nuc970.etimer2", ETMR2_BA, 0x100);
     create_unimplemented_device("nuc970.etimer3", ETMR3_BA, 0x100);
+    create_unimplemented_device("nuc970.wwdt", WWDT_BA, 0x100);
+    create_unimplemented_device("nuc970.sc0", SC0_BA, 0x400);
+    create_unimplemented_device("nuc970.sc1", SC1_BA, 0x400);
+    create_unimplemented_device("nuc970.i2c1", I2C1_BA, 0x100);
+    create_unimplemented_device("nuc970.spi1", SPI1_BA, 0x100);
+    create_unimplemented_device("nuc970.pwm", PWM_BA, 0x1000);
+    create_unimplemented_device("nuc970.kpi", 0xb8008000, 0x1000);
+    create_unimplemented_device("nuc970.adc", ADC_BA, 0x1000);
+    create_unimplemented_device("nuc970.can0", CAN0_BA, 0x400);
+    create_unimplemented_device("nuc970.can1", CAN1_BA, 0x400);
+    create_unimplemented_device("nuc970.mtp", MTP_BA, 0x1000);
 
     /* If the user specified a -bios image, we put it to 0xe00000 and bypass
      * the normal Linux boot process. 
