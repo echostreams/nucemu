@@ -13,7 +13,7 @@
 #include "sysemu/blockdev.h"
 
 #ifndef DEBUG_NUC970_I2C
-#define DEBUG_NUC970_I2C 1
+#define DEBUG_NUC970_I2C 0
 #endif
 
 #define DPRINTF(fmt, args...) \

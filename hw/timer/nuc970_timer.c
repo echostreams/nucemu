@@ -279,6 +279,7 @@ static uint32_t npcm7xx_timer_read_tdr(NPCM7xxTimer* t)
         uint32_t r = npcm7xx_timer_ns_to_count(t, t->base_timer.expires_ns - now);
         //fprintf(stderr, "timer_read_tdr: %d, now: %ld, exp: %ld, %ld\n", r, now, 
         //    t->base_timer.expires_ns, t->base_timer.expires_ns - now);
+        r = (t->ticr & 0xffffff) - r;
         return r;
     }
 
@@ -669,7 +670,8 @@ static void npcm7xx_timer_init(Object* obj)
     s->clock = qdev_init_clock_in(dev, "clock", NULL, NULL, 0);
 
     //clock_update_hz(s->clock, 12 * 1000 * 1000); /* 12MHz */
-    clock_set_hz(s->clock, 12 * 1000 * 1000);
+    clock_set_hz(s->clock, 12 * 1000 * 1000); /* 12MHz */
+
     info_report("NUC970 Timer clock period %lld\n", s->clock->period);
 }
 

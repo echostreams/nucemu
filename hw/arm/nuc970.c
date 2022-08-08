@@ -1,12 +1,5 @@
 /*
- * Marvell MV88W8618 / Freecom nuc970 emulation.
- *
- * Copyright (c) 2008 Jan Kiszka
- *
- * This code is licensed under the GNU GPL v2.
- *
- * Contributions after 2012-01-13 are licensed under the terms of the
- * GNU GPL, version 2 or (at your option) any later version.
+ * nuc970 emulation.
  */
 
 #include "qemu/osdep.h"
@@ -140,7 +133,6 @@ struct nuc970_lcd_state {
     uint32_t osd_wins;  // starting coordinates register
     uint32_t osd_wine;  // ending coordinates register
 
-    
 };
 
 static uint8_t scale_lcd_color(nuc970_lcd_state* s, uint8_t col)
@@ -838,7 +830,8 @@ static uint64_t nuc970_sys_read(void* opaque, hwaddr offset,
         r = 0x1230D008;
         break;
     case 4:
-        r = 0x1F0007D7;
+        //r = 0x1F0007D7;
+        r = 0x1E0007C7;
         break;
     default:
         r = s->regs[offset / 4];
@@ -879,7 +872,7 @@ static void nuc970_sys_init(Object* obj)
         "nuc970-sys", 0x200);
     sysbus_init_mmio(sd, &s->iomem);
     memset(s->regs, 0, sizeof(s->regs));
-    s->regs[0x68/4] = 0xffffffff;
+    s->regs[0x68/4] = 0xffffffff;   // SYS_APBIPRST1
 }
 
 static const TypeInfo nuc970_sys_info = {
@@ -1898,23 +1891,23 @@ static void nuc970_sdhost_send_command(NUC970SdhState* s)
 static uint64_t nuc970_sdh_read(void* opaque, hwaddr offset,
     unsigned size)
 {
-    NUC970SdhState* fmi = (NUC970SdhState*)opaque;
+    NUC970SdhState* sdh = (NUC970SdhState*)opaque;
     uint32_t r = 0;
     switch (offset) {
-    case 0x400: r = fmi->SDH_DMACTL & ~(1<<1); break;
-    case 0x800: r = fmi->SDH_GCTL & ~(1<<0); break;
+    case 0x400: r = sdh->SDH_DMACTL & ~(1<<1); break;
+    case 0x800: r = sdh->SDH_GCTL & ~(1<<0); break;
     case 0x820:
-        //fprintf(stderr, "SDH_CTL: %08x\n", fmi->SDH_CTL);
-        r = fmi->SDH_CTL;
+        //fprintf(stderr, "SDH_CTL: %08x\n", sdh->SDH_CTL);
+        r = sdh->SDH_CTL;
         //r &= ~(1 << 6); // clear CLK8_OE
         //r &= ~(1 << 5); // clear CLK74_OE
         //r &= ~(1 << 14);
         r &= ~(0x407f);
         break;
-    case 0x828: r = fmi->SDH_INTEN; break;
-    case 0x82c: r = fmi->SDH_INTSTS | (1 << 2); break;
-    case 0x830: r = fmi->SDH_RESP0; break;
-    case 0x840: r = fmi->SDH_ECTL; break;
+    case 0x828: r = sdh->SDH_INTEN; break;
+    case 0x82c: r = sdh->SDH_INTSTS | (1 << 2); break;
+    case 0x830: r = sdh->SDH_RESP0; break;
+    case 0x840: r = sdh->SDH_ECTL; break;
     
     default: r = 0; break;
     }
@@ -1968,18 +1961,18 @@ static const MemoryRegionOps nuc970_sdh_ops = {
 static void nuc970_sdh_init(Object* obj)
 {
     SysBusDevice* sd = SYS_BUS_DEVICE(obj);
-    NUC970SdhState* fmi = NUC970_SDH(obj);
+    NUC970SdhState* sdh = NUC970_SDH(obj);
     DriveInfo* di;
     BlockBackend* blk;
     DeviceState* carddev;
 
-    memory_region_init_io(&fmi->iomem, OBJECT(fmi), &nuc970_sdh_ops, fmi,
+    memory_region_init_io(&sdh->iomem, OBJECT(sdh), &nuc970_sdh_ops, sdh,
         "nuc970-sdh", 0x1000);
-    sysbus_init_mmio(sd, &fmi->iomem);
+    sysbus_init_mmio(sd, &sdh->iomem);
 
-    sysbus_init_irq(sd, &fmi->irq);
+    sysbus_init_irq(sd, &sdh->irq);
 
-    qbus_init(&fmi->sdbus, sizeof(fmi->sdbus), TYPE_SD_BUS, 
+    qbus_init(&sdh->sdbus, sizeof(sdh->sdbus), TYPE_SD_BUS,
         DEVICE(sd), "sd-bus");
 
     /* Retrieve SD bus */
@@ -1989,14 +1982,14 @@ static void nuc970_sdh_init(Object* obj)
     /* Plug in SD card */
     carddev = qdev_new(TYPE_SD_CARD);
     qdev_prop_set_drive_err(carddev, "drive", blk, &error_fatal);
-    qdev_realize_and_unref(carddev, &fmi->sdbus, &error_fatal);
+    qdev_realize_and_unref(carddev, &sdh->sdbus, &error_fatal);
 
-    fmi->SDH_DMACTL = 0x00000000;
-    fmi->SDH_GCTL = 0x00000000;
-    fmi->SDH_CTL = 0x01010000;
-    fmi->SDH_INTEN = 0x00000A00;
-    fmi->SDH_INTSTS = 0x0000008C;
-    fmi->SDH_ECTL = 0x00000003;
+    sdh->SDH_DMACTL = 0x00000000;
+    sdh->SDH_GCTL = 0x00000000;
+    sdh->SDH_CTL = 0x01010000;
+    sdh->SDH_INTEN = 0x00000A00;
+    sdh->SDH_INTSTS = 0x0000008C;
+    sdh->SDH_ECTL = 0x00000003;
 
     /*
 # devmem 0xb000c000
@@ -2254,6 +2247,20 @@ static void nuc970_init(MachineState* machine)
     sysbus_create_simple(TYPE_NUC970_SDIC, SDIC_BA, NULL);
     sysbus_create_simple(TYPE_NUC970_RTC, RTC_BA, NULL);
 
+//#define NUC970_TIMER2
+
+#ifdef NUC970_TIMER2
+    dev = qdev_new("nuc970-sys-timer");
+    SysBusDevice* sbd = SYS_BUS_DEVICE(dev);
+    sysbus_realize(sbd, &error_abort);
+    sysbus_mmio_map(sbd, 0, TMR0_BA);
+    int j;
+    for (j = 0; j < 5; j++) {
+        //qemu_irq irq = npcm7xx_irq(s, first_irq + j);
+        //sysbus_connect_irq(sbd, j, irq);
+        sysbus_connect_irq(sbd, j, qdev_get_gpio_in(aic, nuc970_tim_irq[j]));
+    }
+#else
     {
         //dev = qdev_new(TYPE_NPCM7XX_TIMER);
         for (i = 0; i < ARRAY_SIZE(tmr); i++) {
@@ -2280,6 +2287,7 @@ static void nuc970_init(MachineState* machine)
                         
         }
     }
+#endif
     
     /*** UARTs ***/
     uart[0] = nuc970_uart_create(UART0_BA, 64, 0, serial_hd(0),
@@ -2304,9 +2312,9 @@ static void nuc970_init(MachineState* machine)
 
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, SPI0_IRQn));
     
-    sysbus_create_simple(TYPE_NUC970_WDT, 0xb8001800, NULL);
-    sysbus_create_simple("nuc970.rng", 0xb000f000, NULL);
-    sysbus_create_simple(TYPE_NUC970_FMI, 0xb000d000, NULL);
+    sysbus_create_simple(TYPE_NUC970_WDT, WDT_BA, NULL);
+    sysbus_create_simple("nuc970.rng", CRPT_BA, NULL);
+    sysbus_create_simple(TYPE_NUC970_FMI, FMI_BA, NULL);
 
     dev = qdev_new(TYPE_NPCM7XX_EMC);
     s = SYS_BUS_DEVICE(dev);

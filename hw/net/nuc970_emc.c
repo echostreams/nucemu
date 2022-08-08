@@ -183,7 +183,7 @@ static uint32_t imx_phy_read(NPCM7xxEMCState* s, int reg)
     case 1:     /* Basic Status */
         val = s->phy_status;
         break;
-    case 2:     /* ID1 */
+    case 2:     /* ID1 */ /* ICPlus IP101A/G */
         val = 0x0243;
         break;
     case 3:     /* ID2 */
@@ -206,7 +206,12 @@ static uint32_t imx_phy_read(NPCM7xxEMCState* s, int reg)
     case 30:    /* Interrupt mask */
         val = s->phy_int_mask;
         break;
-    case 17:
+    case 17:    /* IP101A_G_IRQ_CONF_STATUS	0x11 */ /* Conf Info IRQ & Status Reg */
+        val = 0x0f00;
+        break;
+    case 16:
+        val = 0x0002;
+        break;
     case 18:
     case 27:
     case 31:
