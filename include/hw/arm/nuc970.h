@@ -2073,7 +2073,7 @@ typedef int* PINT32;   ///< Define 32-bit signed pointer data type
 typedef unsigned int      UINT32;   ///< Define 32-bit unsigned data type
 typedef unsigned int* PUINT32;  ///< Define 32-bit unsigned pointer data type
 
-# if defined ( __GNUC__ ) && !(__CC_ARM)
+# if defined ( __GNUC__ )/* && !(__CC_ARM)*/
 typedef long long           INT64;
 typedef unsigned long long  UINT64;
 #else
@@ -2098,7 +2098,7 @@ typedef unsigned int      REG32;    ///< Define 32-bit register data type
 #define NULL           (0)      ///< NULL pointer
 #endif
 
-#define TRUE           (1)      ///< Boolean true, define to use in API parameters or return value
+//#define TRUE           (1)      ///< Boolean true, define to use in API parameters or return value
 #define FALSE          (0)      ///< Boolean false, define to use in API parameters or return value
 
 #define ENABLE         (1)      ///< Enable, define to use in API parameters

@@ -200,6 +200,7 @@ static void npcm7xx_watchdog_timer_reset_cycles(NPCM7xxWatchdogTimer* t,
     t->base_timer.remaining_ns = ns;
 }
 
+/*
 static void npcm7xx_watchdog_timer_reset(NPCM7xxWatchdogTimer* t)
 {
     int64_t cycles = 1;
@@ -212,6 +213,7 @@ static void npcm7xx_watchdog_timer_reset(NPCM7xxWatchdogTimer* t)
 
     npcm7xx_watchdog_timer_reset_cycles(t, cycles);
 }
+*/
 
 /*
  * Raise the interrupt line if there's a pending interrupt and interrupts are
@@ -364,6 +366,7 @@ static void npcm7xx_timer_write_tisr(NPCM7xxTimerCtrlState* s, uint32_t value)
     }
 }
 
+#if 0
 static void npcm7xx_timer_write_wtcr(NPCM7xxWatchdogTimer* t, uint32_t new_wtcr)
 {
     uint32_t old_wtcr = t->wtcr;
@@ -404,6 +407,7 @@ static void npcm7xx_timer_write_wtcr(NPCM7xxWatchdogTimer* t, uint32_t new_wtcr)
     }
 
 }
+#endif
 
 static hwaddr npcm7xx_tcsr_index(hwaddr reg)
 {
@@ -604,6 +608,7 @@ static void npcm7xx_timer_enter_reset(Object* obj, ResetType type)
         NPCM7XX_WTCR_WTRF);
 }
 
+#if 0
 static void npcm7xx_watchdog_timer_expired(void* opaque)
 {
     NPCM7xxWatchdogTimer* t = opaque;
@@ -628,7 +633,7 @@ static void npcm7xx_watchdog_timer_expired(void* opaque)
         }
     }
 }
-
+#endif
 static void npcm7xx_timer_hold_reset(Object* obj)
 {
     NPCM7xxTimerCtrlState* s = NPCM7XX_TIMER(obj);
@@ -646,7 +651,7 @@ static void npcm7xx_timer_init(Object* obj)
     DeviceState* dev = DEVICE(obj);
     SysBusDevice* sbd = SYS_BUS_DEVICE(obj);
     int i;
-    NPCM7xxWatchdogTimer* w;
+    //NPCM7xxWatchdogTimer* w;
 
     for (i = 0; i < NPCM7XX_TIMERS_PER_CTRL; i++) {
         NPCM7xxTimer* t = &s->timer[i];
@@ -672,7 +677,7 @@ static void npcm7xx_timer_init(Object* obj)
     //clock_update_hz(s->clock, 12 * 1000 * 1000); /* 12MHz */
     clock_set_hz(s->clock, 12 * 1000 * 1000); /* 12MHz */
 
-    info_report("NUC970 Timer clock period %lld\n", s->clock->period);
+    info_report("NUC970 Timer clock period %" PRId64 "\n", s->clock->period);
 }
 
 static const VMStateDescription vmstate_npcm7xx_base_timer = {

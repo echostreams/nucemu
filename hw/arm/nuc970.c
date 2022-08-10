@@ -39,6 +39,7 @@
 #include "hw/arm/nuc970.h"
 #include "hw/sd/sd.h"
 #include "hw/sd/sdhci.h"
+#include "hw/loader.h"
 
 #define MP_MISC_BASE            0x80002000
 #define MP_MISC_SIZE            0x00001000
@@ -134,7 +135,7 @@ struct nuc970_lcd_state {
     uint32_t osd_wine;  // ending coordinates register
 
 };
-
+/*
 static uint8_t scale_lcd_color(nuc970_lcd_state* s, uint8_t col)
 {
     switch (s->brightness) {
@@ -146,6 +147,7 @@ static uint8_t scale_lcd_color(nuc970_lcd_state* s, uint8_t col)
         return (col * s->brightness) / 7;
     }
 }
+*/
 
 static inline void set_lcd_pixel32(nuc970_lcd_state* s,
     int x, int y, uint32_t col)
@@ -164,15 +166,17 @@ static inline void set_lcd_pixel32(nuc970_lcd_state* s,
 
 static void lcd_refresh(void* opaque)
 {
-    nuc970_lcd_state* s = opaque;
-    int x, y, col;
+    int x, y;
+    //int col;
+
+    nuc970_lcd_state* s = opaque;    
     DisplaySurface* surface = qemu_console_surface(s->con);
     uint8_t* data_display;
     data_display = surface_data(surface);
 
-    col = rgb_to_pixel32(scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 16) & 0xff),
-        scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 8) & 0xff),
-        scale_lcd_color(s, MP_LCD_TEXTCOLOR & 0xff));
+    //col = rgb_to_pixel32(scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 16) & 0xff),
+    //    scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 8) & 0xff),
+    //    scale_lcd_color(s, MP_LCD_TEXTCOLOR & 0xff));
 
     dma_memory_read(&address_space_memory, s->va_baddr0, s->video_ram, sizeof(s->video_ram), MEMTXATTRS_UNSPECIFIED);
 
@@ -224,7 +228,7 @@ static void nuc970_lcd_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     nuc970_lcd_state* s = opaque;
-    fprintf(stderr, "lcd_write: %08x %lx\n", offset, value);
+    fprintf(stderr, "lcd_write: %08lx %lx\n", offset, value);
 
     switch (offset) {
     case 0x10:
@@ -1260,6 +1264,7 @@ struct nuc970_gpio_state {
     uint16_t regs[256]; /* GPIOA - GPIOJ */
 };
 
+#if 0
 static void nuc970_gpio_brightness_update(nuc970_gpio_state* s) {
     int i;
     uint32_t brightness;
@@ -1304,6 +1309,7 @@ static void nuc970_gpio_brightness_update(nuc970_gpio_state* s) {
         qemu_set_irq(s->out[i], (brightness >> i) & 1);
     }
 }
+#endif
 
 static void nuc970_gpio_pin_event(void* opaque, int pin, int level)
 {
@@ -1335,7 +1341,7 @@ static uint64_t nuc970_gpio_read(void* opaque, hwaddr offset,
         r = s->regs[offset / 4];
         break;
     }
-    fprintf(stderr, "gpio read %08x = %08x\n", offset, r);
+    fprintf(stderr, "gpio read %08lx = %08x\n", offset, r);
     return r;
 }
 
@@ -1343,7 +1349,7 @@ static void nuc970_gpio_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     nuc970_gpio_state* s = opaque;
-    fprintf(stderr, "gpio write %08x = %08x\n", offset, value);
+    fprintf(stderr, "gpio write %08lx = %08lx\n", offset, value);
     switch (offset) {
     default:
         s->regs[offset / 4] = value & 0xffff;
@@ -1920,7 +1926,7 @@ static void nuc970_sdh_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970SdhState* sdh = (NUC970SdhState*)opaque;
-    fprintf(stderr, "sdh_write(offset=%lx, value=%08x)\n", offset, value);
+    fprintf(stderr, "sdh_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
     case 0x400:
@@ -1931,7 +1937,7 @@ static void nuc970_sdh_write(void* opaque, hwaddr offset,
         break;
     case 0x820:
         sdh->SDH_CTL = value;
-        fprintf(stderr, "CMD_CODE: %02x\n", (value >> 8) & 0x3f);
+        fprintf(stderr, "CMD_CODE: %02lx\n", (value >> 8) & 0x3f);
         if ((value & 0x01) && (value & 0x02))
         {
             nuc970_sdhost_send_command(sdh);
@@ -1965,6 +1971,7 @@ static void nuc970_sdh_init(Object* obj)
     DriveInfo* di;
     BlockBackend* blk;
     DeviceState* carddev;
+    BusState* bus;
 
     memory_region_init_io(&sdh->iomem, OBJECT(sdh), &nuc970_sdh_ops, sdh,
         "nuc970-sdh", 0x1000);
@@ -1982,7 +1989,8 @@ static void nuc970_sdh_init(Object* obj)
     /* Plug in SD card */
     carddev = qdev_new(TYPE_SD_CARD);
     qdev_prop_set_drive_err(carddev, "drive", blk, &error_fatal);
-    qdev_realize_and_unref(carddev, &sdh->sdbus, &error_fatal);
+    bus = qdev_get_child_bus(DEVICE(sd), "sd-bus");
+    qdev_realize_and_unref(carddev, bus, &error_fatal);
 
     sdh->SDH_DMACTL = 0x00000000;
     sdh->SDH_GCTL = 0x00000000;
@@ -2070,6 +2078,7 @@ static const int nuc970_tim_irq[] = {
 
 #define INIT_SHADOW_REGION 1
 
+/*
 static void nuc970_eeprom_init(I2CBus* bus, uint8_t addr, uint32_t rsize)
 {
     I2CSlave* i2c_dev = i2c_slave_new("at24c-eeprom", addr);
@@ -2078,26 +2087,27 @@ static void nuc970_eeprom_init(I2CBus* bus, uint8_t addr, uint32_t rsize)
     qdev_prop_set_uint32(dev, "rom-size", rsize);
     i2c_slave_realize_and_unref(i2c_dev, bus, &error_abort);
 }
+*/
 
 static void nuc970_init(MachineState* machine)
 {
     ARMCPU* cpu;
     DeviceState* dev;
-    DeviceState* pic;
+    //DeviceState* pic;
     DeviceState* aic;
-    DeviceState* uart_orgate;
+    //DeviceState* uart_orgate;
     DeviceState* i2c_dev;
-    DeviceState* lcd_dev;
-    DeviceState* key_dev;
-    DeviceState* uart[2];
+    //DeviceState* lcd_dev;
+    //DeviceState* key_dev;
+    //DeviceState* uart[2];
     NPCM7xxTimerCtrlState tmr[1];
 
-    I2CSlave* wm8750_dev;
+    //I2CSlave* wm8750_dev;
     SysBusDevice* s;
-    I2CBus* i2c;
+    //I2CBus* i2c;
     int i;
-    unsigned long flash_size;
-    DriveInfo* dinfo;
+    //unsigned long flash_size;
+    //DriveInfo* dinfo;
     MemoryRegion* ram_alias;
     MemoryRegion* sram_alias;
 
@@ -2210,7 +2220,8 @@ static void nuc970_init(MachineState* machine)
 
     //nuc970_eeprom_init(i2c, 0x50, 32 * KiB);
 
-    lcd_dev = sysbus_create_simple(TYPE_NUC970_LCD, LCM_BA, NULL);
+    //lcd_dev = 
+    sysbus_create_simple(TYPE_NUC970_LCD, LCM_BA, NULL);
 #if 0
     key_dev = sysbus_create_simple(TYPE_NUC970_KEY, -1, NULL);
 
@@ -2290,16 +2301,18 @@ static void nuc970_init(MachineState* machine)
 #endif
     
     /*** UARTs ***/
-    uart[0] = nuc970_uart_create(UART0_BA, 64, 0, serial_hd(0),
+    //uart[0] = 
+    nuc970_uart_create(UART0_BA, 64, 0, serial_hd(0),
         qdev_get_gpio_in(aic, UART0_IRQn));
-    uart[1] = nuc970_uart_create(UART1_BA, 64, 1, serial_hd(1),
+    //uart[1] = 
+    nuc970_uart_create(UART1_BA, 64, 1, serial_hd(1),
         qdev_get_gpio_in(aic, UART1_IRQn));
 
-    nuc970_uart_create(0xb8000500, 64, 5, serial_hd(5), qdev_get_gpio_in(aic, UART5_IRQn));
-    nuc970_uart_create(0xb8000600, 64, 6, serial_hd(6), qdev_get_gpio_in(aic, UART6_IRQn));
-    nuc970_uart_create(0xb8000700, 64, 7, serial_hd(7), qdev_get_gpio_in(aic, UART7_IRQn));
-    nuc970_uart_create(0xb8000800, 64, 8, serial_hd(8), qdev_get_gpio_in(aic, UART8_IRQn));
-    nuc970_uart_create(0xb8000a00, 64, 10, serial_hd(10), qdev_get_gpio_in(aic, UART10_IRQn));
+    nuc970_uart_create(UART5_BA, 64, 5, serial_hd(5), qdev_get_gpio_in(aic, UART5_IRQn));
+    nuc970_uart_create(UART6_BA, 64, 6, serial_hd(6), qdev_get_gpio_in(aic, UART6_IRQn));
+    nuc970_uart_create(UART7_BA, 64, 7, serial_hd(7), qdev_get_gpio_in(aic, UART7_IRQn));
+    nuc970_uart_create(UART8_BA, 64, 8, serial_hd(8), qdev_get_gpio_in(aic, UART8_IRQn));
+    nuc970_uart_create(UARTA_BA, 64, 10, serial_hd(10), qdev_get_gpio_in(aic, UART10_IRQn));
 
     /*** SPI ***/
     dev = qdev_new("nuc970-spi");

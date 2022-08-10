@@ -1,5 +1,5 @@
 /*
- * Nuvoton NPCM7xx EMC Module
+ * NUC970 EMC Module
  *
  * Copyright 2020 Google LLC
  *
@@ -147,10 +147,10 @@ static void imx_phy_update_link(NPCM7xxEMCState* s)
     imx_phy_update_irq(s);
 }
 
-static void imx_eth_set_link(NetClientState* nc)
-{
-    imx_phy_update_link(NPCM7XX_EMC(qemu_get_nic_opaque(nc)));
-}
+//static void imx_eth_set_link(NetClientState* nc)
+//{
+//    imx_phy_update_link(NPCM7XX_EMC(qemu_get_nic_opaque(nc)));
+//}
 
 static void imx_phy_reset(NPCM7xxEMCState* s)
 {

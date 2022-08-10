@@ -11,6 +11,7 @@
 #include "qemu/units.h"
 #include "qapi/error.h"
 #include "sysemu/blockdev.h"
+#include "hw/qdev-properties.h"
 
 #ifndef DEBUG_NUC970_I2C
 #define DEBUG_NUC970_I2C 0
