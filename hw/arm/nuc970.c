@@ -1681,11 +1681,18 @@ static const TypeInfo nuc970_rtc_info = {
     .instance_size = sizeof(NUC970RtcState),
 };
 
-// fmi
+// Flash Memory Interface (FMI)
+// DMA unit and FMI unit (eMMC or NAND flash)
 
 struct NUC970FmiState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
+
+    DeviceState* nand;
+    uint8_t manf_id;
+    uint8_t chip_id;
+    ECCState ecc;
+
     uint32_t FMI_CTL;           // 0x800
     uint32_t FMI_NANDCTL;       // 0x8a0
     uint32_t FMI_NANDTMCTL;     // 0x8a4
@@ -1723,7 +1730,7 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
     default: r = 0; break;
     }
 
-    //fprintf(stderr, "fmi_read(offset=%lx, value=%08x)\n", offset, r);
+    fprintf(stderr, "fmi_read(offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -1731,7 +1738,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970FmiState* fmi = (NUC970FmiState*)opaque;
-    //fprintf(stderr, "fmi_write(offset=%lx, value=%08x)\n", offset, value);
+    fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
     case 0x800:
@@ -1789,11 +1796,51 @@ static void nuc970_fmi_init(Object* obj)
     fmi->FMI_NANDECTL = 0x0;
 }
 
+static void nuc970_fmi_realize(DeviceState* dev, Error** errp)
+{
+    NUC970FmiState* s = NUC970_FMI(dev);
+    DriveInfo* nand;
+
+    /* FIXME use a qdev drive property instead of drive_get() */
+    nand = drive_get_by_index(IF_MTD, 1);
+    s->nand = nand_init(nand ? blk_by_legacy_dinfo(nand) : NULL,
+        s->manf_id, s->chip_id);
+}
+
+static const VMStateDescription vmstate_nuc970_fmi_info = {
+    .name = "nuc970-fmi",
+    .version_id = 0,
+    .minimum_version_id = 0,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(FMI_CTL, NUC970FmiState),
+        VMSTATE_STRUCT(ecc, NUC970FmiState, 0, vmstate_ecc_state, ECCState),
+        VMSTATE_END_OF_LIST(),
+    },
+};
+
+static Property nuc970_fmi_properties[] = {
+    DEFINE_PROP_UINT8("manf_id", NUC970FmiState, manf_id, NAND_MFR_SAMSUNG),
+    DEFINE_PROP_UINT8("chip_id", NUC970FmiState, chip_id, 0xf1), // 0x73:128M 0xf1:1024M
+    DEFINE_PROP_END_OF_LIST(),
+};
+
+static void nuc970_fmi_class_init(ObjectClass* klass, void* data)
+{
+    DeviceClass* dc = DEVICE_CLASS(klass);
+
+    dc->vmsd = &vmstate_nuc970_fmi_info;
+    device_class_set_props(dc, nuc970_fmi_properties);
+    dc->realize = nuc970_fmi_realize;
+    /* Reason: init() method uses drive_get() */
+    dc->user_creatable = false;
+}
+
 static const TypeInfo nuc970_fmi_info = {
     .name = TYPE_NUC970_FMI,
     .parent = TYPE_SYS_BUS_DEVICE,
     .instance_init = nuc970_fmi_init,
     .instance_size = sizeof(NUC970FmiState),
+    .class_init = nuc970_fmi_class_init,
 };
 
 // SDH : Secure Digital Host Controller

@@ -168,6 +168,7 @@ static uint32_t npcm7xx_timer_ns_to_count(NPCM7xxTimer* t, int64_t ns)
         npcm7xx_tcsr_prescaler(t->tcsr);
 }
 
+#if 0
 static uint32_t npcm7xx_watchdog_timer_prescaler(const NPCM7xxWatchdogTimer* t)
 {
     switch (NPCM7XX_WTCR_WTCLK(t->wtcr)) {
@@ -184,6 +185,7 @@ static uint32_t npcm7xx_watchdog_timer_prescaler(const NPCM7xxWatchdogTimer* t)
     }
 }
 
+
 static void npcm7xx_watchdog_timer_reset_cycles(NPCM7xxWatchdogTimer* t,
     int64_t cycles)
 {
@@ -199,6 +201,7 @@ static void npcm7xx_watchdog_timer_reset_cycles(NPCM7xxWatchdogTimer* t,
 
     t->base_timer.remaining_ns = ns;
 }
+#endif
 
 /*
 static void npcm7xx_watchdog_timer_reset(NPCM7xxWatchdogTimer* t)
