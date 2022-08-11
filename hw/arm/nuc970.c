@@ -1816,10 +1816,13 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
         break;
     case 0x8bc: r = fmi->FMI_NANDRACTL; break;
     case 0x8c0: r = fmi->FMI_NANDECTL; break;
-    default: r = 0; break;
+    default: 
+        r = 0; 
+        fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
+        break;
     }
 
-    fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
+    //fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -1827,7 +1830,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970FmiState* fmi = (NUC970FmiState*)opaque;
-    fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
+    //fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
     case 0x800:
@@ -1865,6 +1868,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         fmi->FMI_NANDECTL = value;
         break;
     default:
+        fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
         break;
     }
 }
