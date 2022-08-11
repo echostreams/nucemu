@@ -1684,6 +1684,79 @@ static const TypeInfo nuc970_rtc_info = {
 // Flash Memory Interface (FMI)
 // DMA unit and FMI unit (eMMC or NAND flash)
 
+/* NAND-type Flash Registers */
+#define REG_SMCSR		(0x8A0)   /* NAND Flash Control and Status Register */
+#define REG_SMTCR		(0x8A4)   /* NAND Flash Timing Control Register */
+#define REG_SMIER		(0x8A8)   /* NAND Flash Interrupt Control Register */
+#define REG_SMISR		(0x8AC)   /* NAND Flash Interrupt Status Register */
+#define REG_SMCMD		(0x8B0)   /* NAND Flash Command Port Register */
+#define REG_SMADDR		(0x8B4)   /* NAND Flash Address Port Register */
+#define REG_SMDATA		(0x8B8)   /* NAND Flash Data Port Register */
+#define REG_SMECC0		(0x8BC)   /* NAND Flash Error Correction Code 0 Register */
+#define REG_SMECC1		(0x8C0)   /* NAND Flash Error Correction Code 1 Register */
+#define REG_SMECC2		(0x8C4)   /* NAND Flash Error Correction Code 2 Register */
+#define REG_SMECC3		(0x8C8)   /* NAND Flash a Error Correction Code 3 Register */
+#define REG_SMRA_0		(0x8CC)   /* NAND Flash Redundant Area Register */
+#define REG_SMRA_1		(0x8D0)
+#define REG_SMRA_2		(0x8D4)
+#define REG_SMRA_3		(0x8D8)
+#define REG_SMRA_4		(0x8DC)
+#define REG_SMRA_5		(0x8E0)
+#define REG_SMRA_6		(0x8E4)
+#define REG_SMRA_7		(0x8E8)
+#define REG_SMRA_8		(0x8EC)
+#define REG_SMRA_9		(0x8F0)
+#define REG_SMRA_10		(0x8F4)
+#define REG_SMRA_11		(0x8F8)
+#define REG_SMRA_12		(0x8FC)
+#define REG_SMRA_13		(0x900)
+#define REG_SMRA_14		(0x904)
+#define REG_SMRA_15		(0x908)   /* NAND Flash Redundant Area Register */
+#define REG_SMECCAD0	(0x90C)   /* NAND Flash ECC Correction Address 0 */
+#define REG_SMECCAD1	(0x910)   /* NAND Flash ECC Correction Address 1 */
+#define REG_ECC4ST		(0x914)   /* ECC4 Correction Status */
+#define REG_ECC4F1A1	(0x918)   /* ECC4 Field 1 Error Address 1 */
+#define REG_ECC4F1A2	(0x91C)   /* ECC4 Field 1 Error Address 2 */
+#define REG_ECC4F1D		(0x920)   /* ECC4 Field 1 Error Data */
+#define REG_ECC4F2A1	(0x924)   /* ECC4 Field 2 Error Address 1 */
+#define REG_ECC4F2A2	(0x928)   /* ECC4 Field 2 Error Address 2 */
+#define REG_ECC4F2D		(0x92C)   /* ECC4 Field 2 Error Data */
+#define REG_ECC4F3A1	(0x930)   /* ECC4 Field 3 Error Address 1 */
+#define REG_ECC4F3A2	(0x934)   /* ECC4 Field 3 Error Address 2 */
+#define REG_ECC4F3D		(0x938)   /* ECC4 Field 3 Error Data */
+#define REG_ECC4F4A1	(0x93C)   /* ECC4 Field 4 Error Address 1 */
+#define REG_ECC4F4A2	(0x940)   /* ECC4 Field 4 Error Address 2 */
+#define REG_ECC4F4D		(0x944)   /* ECC4 Field 4 Error Data */
+
+#define FMI_CTL_NAND_EN     (1<<3)
+#define FMI_CTL_EMMC_EN     (1<<1)
+#define FMI_CTL_SW_RST      (1<<0)
+#define FMI_INTEN_DTA_IE    (1<<0)
+
+#define NAND_EN     0x08
+#define READYBUSY   (0x01 << 18)
+#define ENDADDR     (0x01 << 31)
+
+/*-----------------------------------------------------------------------------
+ * Define some constants for BCH
+ *---------------------------------------------------------------------------*/
+ // define the total padding bytes for 512/1024 data segment
+#define BCH_PADDING_LEN_512     32
+#define BCH_PADDING_LEN_1024    64
+// define the BCH parity code lenght for 512 bytes data pattern
+#define BCH_PARITY_LEN_T4  8
+#define BCH_PARITY_LEN_T8  15
+#define BCH_PARITY_LEN_T12 23
+#define BCH_PARITY_LEN_T15 29
+// define the BCH parity code lenght for 1024 bytes data pattern
+#define BCH_PARITY_LEN_T24 45
+
+#define BCH_T15   0x00400000
+#define BCH_T12   0x00200000
+#define BCH_T8    0x00100000
+#define BCH_T4    0x00080000
+#define BCH_T24   0x00040000
+
 struct NUC970FmiState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
@@ -1721,16 +1794,32 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
     case 0x8a4: r = fmi->FMI_NANDTMCTL; break;
     case 0x8ac:
         //fprintf(stderr, "FMI_NANDINTSTS: %08x\n", fmi->FMI_NANDINTSTS);
-        r = fmi->FMI_NANDINTSTS; break;
-    case 0x8b0: r = fmi->FMI_NANDCMD; break;
-    case 0x8b4: r = fmi->FMI_NANDADDR; break;
-    case 0x8b8: r = fmi->FMI_NANDDATA; break;
+        {
+            int ryby;
+            nand_getpins(fmi->nand, &ryby);
+            if (ryby)
+                r = fmi->FMI_NANDINTSTS | READYBUSY;
+            else
+                r = fmi->FMI_NANDINTSTS;
+        }
+        break;
+    case 0x8b0:
+    case 0x8b4: 
+        r = 0; 
+        fprintf(stderr, "\033[0;32m WRITEONLY REG %08lx\033[0m\n", offset);
+        break;
+    case 0x8b8:
+        //nand_setpins(fmi->nand, 0, 0, 0, fmi->FMI_NANDECTL & 0x01, 0);
+        //fmi->FMI_NANDDATA = ecc_digest(&fmi->ecc, nand_getio(fmi->nand));
+        fmi->FMI_NANDDATA = nand_getio(fmi->nand);
+        r = fmi->FMI_NANDDATA; 
+        break;
     case 0x8bc: r = fmi->FMI_NANDRACTL; break;
     case 0x8c0: r = fmi->FMI_NANDECTL; break;
     default: r = 0; break;
     }
 
-    fprintf(stderr, "fmi_read(offset=%lx, value=%08x)\n", offset, r);
+    fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -1749,18 +1838,25 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         break;
     case 0x8a4:
         fmi->FMI_NANDTMCTL = value;
+
         break;
     case 0x8ac:
         fmi->FMI_NANDINTSTS = value;
         break;
     case 0x8b0:
         fmi->FMI_NANDCMD = value;
+        nand_setpins(fmi->nand, 1/*cle*/, 0/*ale*/, 0/*ce*/, fmi->FMI_NANDECTL & 0x01/*wp*/, 0);   /* CLE */
+        nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
         break;
     case 0x8b4:
         fmi->FMI_NANDADDR = value;
+        nand_setpins(fmi->nand, 0, /*value & ENDADDR ? 1 : 0*/1, 0, fmi->FMI_NANDECTL & 0x01, 0); /* ENDADDR -> ALE */
+        nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
         break;
     case 0x8b8:
-        fmi->FMI_NANDDATA = value;
+        fmi->FMI_NANDDATA = value & 0xff;
+        nand_setpins(fmi->nand, 0, 0, 0, fmi->FMI_NANDECTL & 0x01, 0);
+        nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
         break;
     case 0x8bc:
         fmi->FMI_NANDRACTL = value;
@@ -1794,6 +1890,7 @@ static void nuc970_fmi_init(Object* obj)
     fmi->FMI_NANDCMD = 0x0;
     fmi->FMI_NANDADDR = 0x0;
     fmi->FMI_NANDECTL = 0x0;
+    ecc_reset(&fmi->ecc);
 }
 
 static void nuc970_fmi_realize(DeviceState* dev, Error** errp)
@@ -1820,7 +1917,7 @@ static const VMStateDescription vmstate_nuc970_fmi_info = {
 
 static Property nuc970_fmi_properties[] = {
     DEFINE_PROP_UINT8("manf_id", NUC970FmiState, manf_id, NAND_MFR_SAMSUNG),
-    DEFINE_PROP_UINT8("chip_id", NUC970FmiState, chip_id, 0xf1), // 0x73:128M 0xf1:1024M
+    DEFINE_PROP_UINT8("chip_id", NUC970FmiState, chip_id, 0xaa), // 0x73:128M 0xaa:256M 0xf1:1024M
     DEFINE_PROP_END_OF_LIST(),
 };
 
