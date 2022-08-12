@@ -108,6 +108,37 @@
 
 #define MP_LCD_TEXTCOLOR        0xe0e0ff /* RRGGBB */
 
+void DumpHex(const void* data, size_t size) {
+    char ascii[17];
+    size_t i, j;
+    ascii[16] = '\0';
+    for (i = 0; i < size; ++i) {
+        printf("%02X ", ((unsigned char*)data)[i]);
+        if (((unsigned char*)data)[i] >= ' ' && ((unsigned char*)data)[i] <= '~') {
+            ascii[i % 16] = ((unsigned char*)data)[i];
+        }
+        else {
+            ascii[i % 16] = '.';
+        }
+        if ((i + 1) % 8 == 0 || i + 1 == size) {
+            printf(" ");
+            if ((i + 1) % 16 == 0) {
+                printf("|  %s \n", ascii);
+            }
+            else if (i + 1 == size) {
+                ascii[(i + 1) % 16] = '\0';
+                if ((i + 1) % 16 <= 8) {
+                    printf(" ");
+                }
+                for (j = (i + 1) % 16; j < 16; ++j) {
+                    printf("   ");
+                }
+                printf("|  %s \n", ascii);
+            }
+        }
+    }
+}
+
 #define TYPE_NUC970_LCD "nuc970_lcd"
 OBJECT_DECLARE_SIMPLE_TYPE(nuc970_lcd_state, NUC970_LCD)
 
@@ -1692,21 +1723,23 @@ static const TypeInfo nuc970_rtc_info = {
 #define REG_SMCMD		(0x8B0)   /* NAND Flash Command Port Register */
 #define REG_SMADDR		(0x8B4)   /* NAND Flash Address Port Register */
 #define REG_SMDATA		(0x8B8)   /* NAND Flash Data Port Register */
-#define REG_SMECC0		(0x8BC)   /* NAND Flash Error Correction Code 0 Register */
-#define REG_SMECC1		(0x8C0)   /* NAND Flash Error Correction Code 1 Register */
-#define REG_SMECC2		(0x8C4)   /* NAND Flash Error Correction Code 2 Register */
-#define REG_SMECC3		(0x8C8)   /* NAND Flash a Error Correction Code 3 Register */
-#define REG_SMRA_0		(0x8CC)   /* NAND Flash Redundant Area Register */
-#define REG_SMRA_1		(0x8D0)
-#define REG_SMRA_2		(0x8D4)
-#define REG_SMRA_3		(0x8D8)
-#define REG_SMRA_4		(0x8DC)
-#define REG_SMRA_5		(0x8E0)
-#define REG_SMRA_6		(0x8E4)
-#define REG_SMRA_7		(0x8E8)
-#define REG_SMRA_8		(0x8EC)
-#define REG_SMRA_9		(0x8F0)
-#define REG_SMRA_10		(0x8F4)
+
+#define REG_SMECC0		(0x8D0)   /* NAND Flash Error Correction Code 0 Register */
+#define REG_SMECC1		(0x8D4)   /* NAND Flash Error Correction Code 1 Register */
+#define REG_SMECC2		(0x8D8)   /* NAND Flash Error Correction Code 2 Register */
+#define REG_SMECC3		(0x8DC)   /* NAND Flash a Error Correction Code 3 Register */
+
+#define REG_SMRA_0		(0x8E0)   /* NAND Flash Redundant Area Register */
+#define REG_SMRA_1		(0x8E4)
+#define REG_SMRA_2		(0x900)
+#define REG_SMRA_3		(0x904)
+#define REG_SMRA_4		(0x908)
+#define REG_SMRA_5		(0x90C)
+#define REG_SMRA_6		(0x910)
+#define REG_SMRA_7		(0x914)
+#define REG_SMRA_8		(0x918)
+#define REG_SMRA_9		(0x91C)
+#define REG_SMRA_10		(0x920)
 #define REG_SMRA_11		(0x8F8)
 #define REG_SMRA_12		(0x8FC)
 #define REG_SMRA_13		(0x900)
@@ -1766,15 +1799,26 @@ struct NUC970FmiState {
     uint8_t chip_id;
     ECCState ecc;
 
+    uint32_t FMI_DMACTL;        // 0x400
+    uint32_t FMI_DMASA;         // 0x408
+    uint32_t FMI_DMABCNT;       // 0x40c
+    uint32_t FMI_DMAINTEN;      // 0x410
+    uint32_t FMI_DMAINTSTS;     // 0x414
     uint32_t FMI_CTL;           // 0x800
+    uint32_t FMI_INTEN;         // 0x804
+    uint32_t FMI_INTSTS;        // 0x808
+    // eMMC registers           // 0x820~0x83c
     uint32_t FMI_NANDCTL;       // 0x8a0
     uint32_t FMI_NANDTMCTL;     // 0x8a4
+    uint32_t FMI_NANDINTEN;     // 0x8a8
     uint32_t FMI_NANDINTSTS;    // 0x8ac
     uint32_t FMI_NANDCMD;       // 0x8b0
     uint32_t FMI_NANDADDR;      // 0x8b4
     uint32_t FMI_NANDDATA;      // 0x8b8
     uint32_t FMI_NANDRACTL;     // 0x8bc
     uint32_t FMI_NANDECTL;      // 0x8c0
+
+    uint32_t FMI_NANDRA[118];   // 0xa00 + 04 * n(0,1,...117)
 };
 
 #define TYPE_NUC970_FMI "nuc970-fmi"
@@ -1816,6 +1860,9 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
         break;
     case 0x8bc: r = fmi->FMI_NANDRACTL; break;
     case 0x8c0: r = fmi->FMI_NANDECTL; break;
+    case 0xa00 ... 0xbd4:
+        r = fmi->FMI_NANDRA[(offset - 0xa00) / 4];
+        break;
     default: 
         r = 0; 
         fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
@@ -1833,27 +1880,70 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     //fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
+    case 0x400:
+        fmi->FMI_DMACTL = value & ~(1 << 1); // remove SW_RST[1] bit
+        break;
+    case 0x408:
+        fmi->FMI_DMASA = value;
+        break;
+    case 0x410:
+        fmi->FMI_DMAINTEN = value;
+        break;
     case 0x800:
         fmi->FMI_CTL = value;
         break;
     case 0x8a0:
-        fmi->FMI_NANDCTL = value;
+        if (value & (1 << 0)) {  // Software Engine Reset
+            printf("********** Software Engine Reset...\n");
+        }
+        else if (value & (1 << 1)) { // DMA Read Data (1 page)
+            printf("********** DMA Read Data...\n");
+            uint8_t page[2048/* + 64*/];
+            for (int i = 0; i < (2048/* + 64*/); i++)
+            {
+                //page[i] = ecc_digest(&fmi->ecc, nand_getio(fmi->nand));
+                page[i] = nand_getio(fmi->nand);
+            }
+            dma_memory_write(&address_space_memory, fmi->FMI_DMASA, page,
+                sizeof(page), MEMTXATTRS_UNSPECIFIED);
+            
+            DumpHex(page, sizeof(page));
+
+            fmi->FMI_NANDINTSTS |= (1 << 0);    // DMA_IF
+        }
+        else if (value & (1 << 2)) { // DMA Write Data (1 page)
+            printf("********** DMA Write Data...\n");
+        }
+        else if (value & (1 << 3)) { // Redundant Area Read Enable
+            printf("********** Redundant Area Read...\n");
+        }
+        fmi->FMI_NANDCTL = value & ~(0x3f); // remove [5:0] bit        
         break;
     case 0x8a4:
         fmi->FMI_NANDTMCTL = value;
-
+        break;
+    case 0x8a8:
+        fmi->FMI_NANDINTEN = value;
         break;
     case 0x8ac:
+        if (value & (1 << 0))
+            value &= ~(1 << 0); // clear DMA_IF
+        if (value & (1 << 2))
+            value &= ~(1 << 2); // clear ECC_FLD_IF
+        if (value & (1 << 10))
+            value &= ~(1 << 10);    // clear RB0_IF
         fmi->FMI_NANDINTSTS = value;
         break;
     case 0x8b0:
+        fprintf(stderr, "FMI_NANDCMD (offset=%lx, value=%08lx)\n", offset, value);
         fmi->FMI_NANDCMD = value;
         nand_setpins(fmi->nand, 1/*cle*/, 0/*ale*/, 0/*ce*/, fmi->FMI_NANDECTL & 0x01/*wp*/, 0);   /* CLE */
         nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
         break;
     case 0x8b4:
+        fprintf(stderr, "FMI_NANDADDR(offset=%lx, value=%08lx)\n", offset, value);
         fmi->FMI_NANDADDR = value;
-        nand_setpins(fmi->nand, 0, /*value & ENDADDR ? 1 : 0*/1, 0, fmi->FMI_NANDECTL & 0x01, 0); /* ENDADDR -> ALE */
+        nand_setpins(fmi->nand, 0, /*value & ENDADDR ? 1 : 0*/1, 0, fmi->FMI_NANDECTL & 0x01, 0); /* ENDADDR -> ALE */        
         nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
         break;
     case 0x8b8:
@@ -1867,8 +1957,12 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     case 0x8c0:
         fmi->FMI_NANDECTL = value;
         break;
+
+    case 0xa00 ... 0xbd4:
+        fmi->FMI_NANDRA[(offset - 0xa00) / 4] = value;
+        break;
     default:
-        fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
+        //fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
         break;
     }
 }
