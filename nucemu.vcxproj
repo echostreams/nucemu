@@ -94,6 +94,7 @@
   <ItemGroup>
     <ClCompile Include="hw\arm\nuc970.c" />
     <ClCompile Include="hw\block\m25p80.c" />
+    <ClCompile Include="hw\block\nand.c" />
     <ClCompile Include="hw\char\nuc970_uart.c" />
     <ClCompile Include="hw\i2c\nuc970_i2c.c" />
     <ClCompile Include="hw\intc\nuc970_aic.c" />

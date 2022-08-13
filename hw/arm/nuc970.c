@@ -1836,8 +1836,7 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
         r = fmi->FMI_NANDCTL & ~(1); // clear SR_RST BIT
         break;
     case 0x8a4: r = fmi->FMI_NANDTMCTL; break;
-    case 0x8ac:
-        //fprintf(stderr, "FMI_NANDINTSTS: %08x\n", fmi->FMI_NANDINTSTS);
+    case 0x8ac:        
         {
             int ryby;
             nand_getpins(fmi->nand, &ryby);
@@ -1846,6 +1845,7 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
             else
                 r = fmi->FMI_NANDINTSTS;
         }
+        fprintf(stderr, "FMI_NANDINTSTS: %08x\n", r);
         break;
     case 0x8b0:
     case 0x8b4: 
@@ -1877,6 +1877,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970FmiState* fmi = (NUC970FmiState*)opaque;
+    int ryby = 0;
     //fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
@@ -1898,8 +1899,8 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         }
         else if (value & (1 << 1)) { // DMA Read Data (1 page)
             printf("********** DMA Read Data...\n");
-            uint8_t page[2048/* + 64*/];
-            for (int i = 0; i < (2048/* + 64*/); i++)
+            uint8_t page[2048 + 64];
+            for (int i = 0; i < (2048 + 64); i++)
             {
                 //page[i] = ecc_digest(&fmi->ecc, nand_getio(fmi->nand));
                 page[i] = nand_getio(fmi->nand);
@@ -1907,7 +1908,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
             dma_memory_write(&address_space_memory, fmi->FMI_DMASA, page,
                 sizeof(page), MEMTXATTRS_UNSPECIFIED);
             
-            DumpHex(page, sizeof(page));
+            //DumpHex(page, sizeof(page));
 
             fmi->FMI_NANDINTSTS |= (1 << 0);    // DMA_IF
         }
@@ -1939,17 +1940,32 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         fmi->FMI_NANDCMD = value;
         nand_setpins(fmi->nand, 1/*cle*/, 0/*ale*/, 0/*ce*/, fmi->FMI_NANDECTL & 0x01/*wp*/, 0);   /* CLE */
         nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
+        nand_getpins(fmi->nand, &ryby);
+        if (ryby)
+            fmi->FMI_NANDINTSTS |= READYBUSY;
+        else
+            fmi->FMI_NANDINTSTS &= ~READYBUSY;
         break;
     case 0x8b4:
         fprintf(stderr, "FMI_NANDADDR(offset=%lx, value=%08lx)\n", offset, value);
         fmi->FMI_NANDADDR = value;
         nand_setpins(fmi->nand, 0, /*value & ENDADDR ? 1 : 0*/1, 0, fmi->FMI_NANDECTL & 0x01, 0); /* ENDADDR -> ALE */        
         nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
+        nand_getpins(fmi->nand, &ryby);
+        if (ryby)
+            fmi->FMI_NANDINTSTS |= READYBUSY;
+        else
+            fmi->FMI_NANDINTSTS &= ~READYBUSY;
         break;
     case 0x8b8:
         fmi->FMI_NANDDATA = value & 0xff;
         nand_setpins(fmi->nand, 0, 0, 0, fmi->FMI_NANDECTL & 0x01, 0);
         nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
+        nand_getpins(fmi->nand, &ryby); // always 1
+        if (ryby)
+            fmi->FMI_NANDINTSTS |= READYBUSY;
+        else
+            fmi->FMI_NANDINTSTS &= ~READYBUSY;
         break;
     case 0x8bc:
         fmi->FMI_NANDRACTL = value;
