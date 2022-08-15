@@ -1830,12 +1830,14 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
     NUC970FmiState* fmi = (NUC970FmiState*)opaque;
     uint32_t r = 0;
     switch (offset) {
+    case 0x400: r = fmi->FMI_DMACTL; break;
     case 0x800: r = fmi->FMI_CTL; break;
     case 0x8a0:
         //fprintf(stderr, "FMI_NANDCTL: %08x\n", fmi->FMI_NANDCTL);
         r = fmi->FMI_NANDCTL & ~(1); // clear SR_RST BIT
         break;
     case 0x8a4: r = fmi->FMI_NANDTMCTL; break;
+    case 0x8a8: r = fmi->FMI_NANDINTEN; break;
     case 0x8ac:        
         {
             int ryby;
@@ -1845,7 +1847,7 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
             else
                 r = fmi->FMI_NANDINTSTS;
         }
-        fprintf(stderr, "FMI_NANDINTSTS: %08x\n", r);
+        //fprintf(stderr, "FMI_NANDINTSTS: %08x\n", r);
         break;
     case 0x8b0:
     case 0x8b4: 
@@ -1914,6 +1916,26 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         }
         else if (value & (1 << 2)) { // DMA Write Data (1 page)
             printf("********** DMA Write Data...\n");
+            uint8_t page[2048];
+            dma_memory_read(&address_space_memory, fmi->FMI_DMASA, page, sizeof(page), MEMTXATTRS_UNSPECIFIED);
+            
+            nand_setpins(fmi->nand, 0, 0, 0, fmi->FMI_NANDECTL & 0x01, 0);
+            for (int i = 0; i < (2048); i++)
+            {
+                nand_setio(fmi->nand, page[i]);
+            }
+            
+            //DumpHex(page, sizeof(page));
+            for (int i = 0; i < 16; i++) {
+                printf(" %08x", fmi->FMI_NANDRA[i]);
+                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  0) & 0xff);
+                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  8) & 0xff);
+                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 16) & 0xff);
+                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 24) & 0xff);
+            }
+
+            fmi->FMI_NANDINTSTS |= (1 << 0);
+
         }
         else if (value & (1 << 3)) { // Redundant Area Read Enable
             printf("********** Redundant Area Read...\n");
@@ -1936,7 +1958,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         fmi->FMI_NANDINTSTS = value;
         break;
     case 0x8b0:
-        fprintf(stderr, "FMI_NANDCMD (offset=%lx, value=%08lx)\n", offset, value);
+        //fprintf(stderr, "FMI_NANDCMD (offset=%lx, value=%08lx)\n", offset, value);
         fmi->FMI_NANDCMD = value;
         nand_setpins(fmi->nand, 1/*cle*/, 0/*ale*/, 0/*ce*/, fmi->FMI_NANDECTL & 0x01/*wp*/, 0);   /* CLE */
         nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
@@ -1947,7 +1969,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
             fmi->FMI_NANDINTSTS &= ~READYBUSY;
         break;
     case 0x8b4:
-        fprintf(stderr, "FMI_NANDADDR(offset=%lx, value=%08lx)\n", offset, value);
+        //fprintf(stderr, "FMI_NANDADDR(offset=%lx, value=%08lx)\n", offset, value);
         fmi->FMI_NANDADDR = value;
         nand_setpins(fmi->nand, 0, /*value & ENDADDR ? 1 : 0*/1, 0, fmi->FMI_NANDECTL & 0x01, 0); /* ENDADDR -> ALE */        
         nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
