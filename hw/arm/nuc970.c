@@ -2218,8 +2218,8 @@ static void nuc970_sdh_write(void* opaque, hwaddr offset,
         break;
     case 0x820:
         sdh->SDH_CTL = value;
-        fprintf(stderr, "CMD_CODE: %02lx\n", (value >> 8) & 0x3f);
-        if ((value & 0x01) && (value & 0x02))
+        fprintf(stderr, "%08lx CMD_CODE: %02lx\n", value, (value >> 8) & 0x3f);
+        if ((value & 0x01) || (value & 0x02))
         {
             nuc970_sdhost_send_command(sdh);
         }
