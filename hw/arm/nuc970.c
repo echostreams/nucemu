@@ -1790,6 +1790,14 @@ static const TypeInfo nuc970_rtc_info = {
 #define BCH_T4    0x00080000
 #define BCH_T24   0x00040000
 
+static const int g_i32BCHAlgoIdx[5] = { BCH_T4, BCH_T8, BCH_T12, BCH_T15, BCH_T24 };
+static const int g_i32ParityNum[4][5] = {
+    { 8,    15,     23,     29,     -1  },  // For 512
+    { 32,   60,     92,     116,    90  },  // For 2K
+    { 64,   120,    184,    232,    180 },  // For 4K
+    { 128,  240,    368,    464,    360 },  // For 8K
+};
+
 struct NUC970FmiState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
@@ -1817,12 +1825,212 @@ struct NUC970FmiState {
     uint32_t FMI_NANDDATA;      // 0x8b8
     uint32_t FMI_NANDRACTL;     // 0x8bc
     uint32_t FMI_NANDECTL;      // 0x8c0
-
+    uint32_t FMI_NANDECCES[4];  // 0x8d0~0x8dc
+    uint32_t FMI_NANDECCPROTA[2]; // 0x8e0~0x8e4
+    uint32_t FMI_NANDECCEA[12]; // 0x900~0x92c
+    uint32_t FMI_NANDECCED[6];  // 0x960~0x974
     uint32_t FMI_NANDRA[118];   // 0xa00 + 04 * n(0,1,...117)
 };
 
 #define TYPE_NUC970_FMI "nuc970-fmi"
 OBJECT_DECLARE_SIMPLE_TYPE(NUC970FmiState, NUC970_FMI)
+
+/*-----------------------------------------------------------------------------
+ * Correct data by BCH alrogithm.
+ *      Support 8K page size NAND and BCH T4/8/12/15/24.
+ *---------------------------------------------------------------------------*/
+void fmiSM_CorrectData_BCH(NUC970FmiState *fmi, uint8_t ucFieidIndex, uint8_t ucErrorCnt, uint8_t* pDAddr)
+{
+    uint32_t uaData[24], uaAddr[24];
+    uint32_t uaErrorData[6];
+    uint8_t  ii, jj;
+    uint32_t uPageSize;
+    uint32_t field_len, padding_len, parity_len;
+    uint32_t total_field_num;
+    uint8_t* smra_index;
+
+    //--- assign some parameters for different BCH and page size
+    switch (fmi->FMI_NANDCTL & 0x007C0000)
+    {
+    case BCH_T24:
+        field_len = 1024;
+        padding_len = BCH_PADDING_LEN_1024;
+        parity_len = BCH_PARITY_LEN_T24;
+        break;
+    case BCH_T15:
+        field_len = 512;
+        padding_len = BCH_PADDING_LEN_512;
+        parity_len = BCH_PARITY_LEN_T15;
+        break;
+    case BCH_T12:
+        field_len = 512;
+        padding_len = BCH_PADDING_LEN_512;
+        parity_len = BCH_PARITY_LEN_T12;
+        break;
+    case BCH_T8:
+        field_len = 512;
+        padding_len = BCH_PADDING_LEN_512;
+        parity_len = BCH_PARITY_LEN_T8;
+        break;
+    case BCH_T4:
+        field_len = 512;
+        padding_len = BCH_PADDING_LEN_512;
+        parity_len = BCH_PARITY_LEN_T4;
+        break;
+    default:
+        return;
+    }
+
+    uPageSize = fmi->FMI_NANDCTL & 0x00030000;
+    switch (uPageSize)
+    {
+    case 0x30000: total_field_num = 8192 / field_len; break;
+    case 0x20000: total_field_num = 4096 / field_len; break;
+    case 0x10000: total_field_num = 2048 / field_len; break;
+    case 0x00000: total_field_num = 512 / field_len; break;
+    default:
+        return;
+    }
+
+    //--- got valid BCH_ECC_DATAx and parse them to uaData[]
+    // got the valid register number of BCH_ECC_DATAx since one register include 4 error bytes
+    jj = ucErrorCnt / 4;
+    jj++;
+    if (jj > 6)
+        jj = 6;     // there are 6 BCH_ECC_DATAx registers to support BCH T24
+
+    for (ii = 0; ii < jj; ii++)
+    {
+        uaErrorData[ii] = fmi->FMI_NANDECCED[ii];
+    }
+
+    for (ii = 0; ii < jj; ii++)
+    {
+        uaData[ii * 4 + 0] = uaErrorData[ii] & 0xff;
+        uaData[ii * 4 + 1] = (uaErrorData[ii] >> 8) & 0xff;
+        uaData[ii * 4 + 2] = (uaErrorData[ii] >> 16) & 0xff;
+        uaData[ii * 4 + 3] = (uaErrorData[ii] >> 24) & 0xff;
+    }
+
+    //--- got valid REG_BCH_ECC_ADDRx and parse them to uaAddr[]
+    // got the valid register number of REG_BCH_ECC_ADDRx since one register include 2 error addresses
+    jj = ucErrorCnt / 2;
+    jj++;
+    if (jj > 12)
+        jj = 12;    // there are 12 REG_BCH_ECC_ADDRx registers to support BCH T24
+
+    for (ii = 0; ii < jj; ii++)
+    {
+        uaAddr[ii * 2 + 0] = fmi->FMI_NANDECCEA[ii] & 0x07ff;   // 11 bits for error address
+        uaAddr[ii * 2 + 1] = (fmi->FMI_NANDECCEA[ii] >> 16) & 0x07ff;
+    }
+
+    //--- pointer to begin address of field that with data error
+    pDAddr += (ucFieidIndex - 1) * field_len;
+
+    //--- correct each error bytes
+    for (ii = 0; ii < ucErrorCnt; ii++)
+    {
+        // for wrong data in field
+        if (uaAddr[ii] < field_len)
+        {
+            *(pDAddr + uaAddr[ii]) ^= uaData[ii];
+        }
+        // for wrong first-3-bytes in redundancy area
+        else if (uaAddr[ii] < (field_len + 3))
+        {
+            uaAddr[ii] -= field_len;
+            uaAddr[ii] += (parity_len * (ucFieidIndex - 1));    // field offset
+            *((uint8_t*)fmi->FMI_NANDRA + uaAddr[ii]) ^= uaData[ii];
+        }
+        // for wrong parity code in redundancy area
+        else
+        {
+            // BCH_ERR_ADDRx = [data in field] + [3 bytes] + [xx] + [parity code]
+            //                                   |<--     padding bytes      -->|
+            // The BCH_ERR_ADDRx for last parity code always = field size + padding size.
+            // So, the first parity code = field size + padding size - parity code length.
+            // For example, for BCH T12, the first parity code = 512 + 32 - 23 = 521.
+            // That is, error byte address offset within field is
+            uaAddr[ii] = uaAddr[ii] - (field_len + padding_len - parity_len);
+
+            // smra_index point to the first parity code of first field in register SMRA0~n
+            smra_index = (uint8_t*)
+                ((uint8_t*)fmi->FMI_NANDRA + (fmi->FMI_NANDRACTL & 0x1ff) - // bottom of all parity code -
+                    (parity_len * total_field_num)                             // byte count of all parity code
+                    );
+
+            // final address = first parity code of first field +
+            //                 offset of fields +
+            //                 offset within field
+            *((uint8_t*)smra_index + (parity_len * (ucFieidIndex - 1)) + uaAddr[ii]) ^= uaData[ii];
+        }
+    }   // end of for (ii<ucErrorCnt)
+}
+
+int fmiPageSize(NUC970FmiState* fmi)
+{
+    switch ((fmi->FMI_NANDCTL >> 16) & 0x3) {   // PSIZE[17:16]
+    case 0:
+        return 512;
+    case 1:
+        return 2048;
+    case 2:
+        return 4096;
+    case 3:
+        return 8192;
+    }
+    return 512;
+}
+
+int fmiSMCorrectData(NUC970FmiState *fmi, unsigned long uDAddr)
+{
+    int uStatus, ii, jj, i32FieldNum = 0;
+    volatile int uErrorCnt = 0;
+
+    if (fmi->FMI_NANDINTSTS & 0x4)
+    {
+        if ((fmi->FMI_NANDCTL & 0x7C0000) == BCH_T24)
+            i32FieldNum = /*mtd->writesize*/fmiPageSize(fmi) / 1024;    // Block=1024 for BCH
+        else
+            i32FieldNum = /*mtd->writesize*/fmiPageSize(fmi) / 512;
+
+        if (i32FieldNum < 4)
+            i32FieldNum = 1;
+        else
+            i32FieldNum /= 4;
+
+        for (jj = 0; jj < i32FieldNum; jj++)
+        {
+            uStatus = fmi->FMI_NANDECCES[jj];
+            if (!uStatus)
+                continue;
+
+            for (ii = 1; ii < 5; ii++)
+            {
+                if (!(uStatus & 0x03)) { // No error
+
+                    uStatus >>= 8;
+                    continue;
+
+                }
+                else if ((uStatus & 0x03) == 0x01) { // Correctable error
+
+                    uErrorCnt = (uStatus >> 2) & 0x1F;
+                    fmiSM_CorrectData_BCH(fmi, jj * 4 + ii, uErrorCnt, (uint8_t*)uDAddr);
+
+                    uStatus >>= 8;
+                    continue;
+                }
+                else // uncorrectable error or ECC error
+                {
+                    return -1;
+                }
+            }
+        } //jj
+    }
+    return uErrorCnt;
+}
 
 static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
     unsigned size)
