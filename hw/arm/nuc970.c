@@ -1997,6 +1997,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         break;
 
     case 0xa00 ... 0xbd4:
+        fprintf(stderr, "NANDRA (offset=%lx, value=%08lx)\n", offset, value);
         fmi->FMI_NANDRA[(offset - 0xa00) / 4] = value;
         break;
     default:
@@ -2275,8 +2276,8 @@ static void nuc970_sdh_init(Object* obj)
     sdh->SDH_DMACTL = 0x00000000;
     sdh->SDH_GCTL = 0x00000000;
     sdh->SDH_CTL = 0x01010000;
-    sdh->SDH_INTEN = 0x00000A00;
-    sdh->SDH_INTSTS = 0x0000008C;
+    sdh->SDH_INTEN = 0x40000A00;
+    sdh->SDH_INTSTS = 0x013E00AC;
     sdh->SDH_ECTL = 0x00000003;
 
     /*
