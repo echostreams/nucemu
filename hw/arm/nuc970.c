@@ -2205,6 +2205,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         break;
 
     case 0xa00 ... 0xbd4:
+        fprintf(stderr, "NANDRA (offset=%lx, value=%08lx)\n", offset, value);
         fmi->FMI_NANDRA[(offset - 0xa00) / 4] = value;
         break;
     default:
@@ -2425,8 +2426,8 @@ static void nuc970_sdh_write(void* opaque, hwaddr offset,
         break;
     case 0x820:
         sdh->SDH_CTL = value;
-        fprintf(stderr, "CMD_CODE: %02lx\n", (value >> 8) & 0x3f);
-        if ((value & 0x01) && (value & 0x02))
+        fprintf(stderr, "%08lx CMD_CODE: %02lx\n", value, (value >> 8) & 0x3f);
+        if ((value & 0x01) || (value & 0x02))
         {
             nuc970_sdhost_send_command(sdh);
         }
@@ -2483,8 +2484,8 @@ static void nuc970_sdh_init(Object* obj)
     sdh->SDH_DMACTL = 0x00000000;
     sdh->SDH_GCTL = 0x00000000;
     sdh->SDH_CTL = 0x01010000;
-    sdh->SDH_INTEN = 0x00000A00;
-    sdh->SDH_INTSTS = 0x0000008C;
+    sdh->SDH_INTEN = 0x40000A00;
+    sdh->SDH_INTSTS = 0x013E00AC;
     sdh->SDH_ECTL = 0x00000003;
 
     /*
