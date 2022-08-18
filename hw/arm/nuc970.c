@@ -2560,6 +2560,18 @@ struct NUC970SdhState {
 #define TYPE_NUC970_SDH "nuc970-sdh"
 OBJECT_DECLARE_SIMPLE_TYPE(NUC970SdhState, NUC970_SDH)
 
+static int SD_Swap32(int val)
+{
+    int buf;
+
+    buf = val;
+    val <<= 24;
+    val |= (buf << 8) & 0xff0000;
+    val |= (buf >> 8) & 0xff00;
+    val |= (buf >> 24) & 0xff;
+    return val;
+}
+
 static void nuc970_sdhost_send_command(NUC970SdhState* s)
 {
     SDRequest request;
@@ -2591,22 +2603,30 @@ static void nuc970_sdhost_send_command(NUC970SdhState* s)
 
         /* If the command has a response, store it in the response registers */
         //if (s->SDH_CTL & SDH_CTL_RIEN_Msk) 
-        {            
-            
+        {   
             if (rlen == 4 /*&& !(s->command & SD_CMDR_RESPONSE_LONG)*/) {
                 
                 s->SDH_RESP0 = resp[0] << 16 | resp[1] << 8 | resp[2]; // [47:16]
                 s->SDH_RESP1 = resp[3]; // [15:8]
                 //s->response[0] = ldl_be_p(&resp[0]);
                 //s->response[1] = s->response[2] = s->response[3] = 0;
-
             }
             else if (rlen == 16 /*&& (s->command & SD_CMDR_RESPONSE_LONG)*/) {
-                s->SDH_FB[0] = ldl_be_p(&resp[12]);
-                s->SDH_FB[1] = ldl_be_p(&resp[8]);
-                s->SDH_FB[2] = ldl_be_p(&resp[4]);
-                s->SDH_FB[3] = ldl_be_p(&resp[0]);
-                printf(" %08x %08x %08x %08x\n", s->SDH_FB[0], s->SDH_FB[1], s->SDH_FB[2], s->SDH_FB[3]);
+                
+                s->SDH_FB[0] = resp[0] << 16 | resp[1] << 8 | resp[2];
+                s->SDH_FB[1] = resp[3] << 24 | resp[4] << 16 | resp[5] << 8 | resp[6];
+                s->SDH_FB[2] = resp[7] << 24 | resp[8] << 16 | resp[9] << 8 | resp[10];
+                s->SDH_FB[3] = resp[11] << 24 | resp[12] << 16 | resp[13] << 8 | resp[14];
+                s->SDH_FB[4] = resp[15];
+                
+                s->SDH_FB[0] = SD_Swap32(s->SDH_FB[0]);
+                s->SDH_FB[1] = SD_Swap32(s->SDH_FB[1]);
+                s->SDH_FB[2] = SD_Swap32(s->SDH_FB[2]);
+                s->SDH_FB[3] = SD_Swap32(s->SDH_FB[3]);
+                s->SDH_FB[4] = SD_Swap32(s->SDH_FB[4]);
+
+                printf(" %08x %08x %08x %08x %08x\n", 
+                    s->SDH_FB[0], s->SDH_FB[1], s->SDH_FB[2], s->SDH_FB[3], s->SDH_FB[4]);
                 //s->response[0] = ldl_be_p(&resp[12]);
                 //s->response[1] = ldl_be_p(&resp[8]);
                 //s->response[2] = ldl_be_p(&resp[4]);
@@ -2648,14 +2668,20 @@ static uint64_t nuc970_sdh_read(void* opaque, hwaddr offset,
         r &= ~(0x407f);
         break;
     case 0x828: r = sdh->SDH_INTEN; break;
-    case 0x82c: r = sdh->SDH_INTSTS | (1 << SDH_INTSTS_CRC7_Pos); break;
+    case 0x82c: 
+        r = sdh->SDH_INTSTS | 
+            (1 << SDH_INTSTS_CRC7_Pos) |
+            (1 << SDH_INTSTS_CRC16_Pos) |
+            (1 << SDH_INTSTS_DAT0STS_Pos);
+        break;
     case 0x830: r = sdh->SDH_RESP0; break;
+    case 0x834: r = sdh->SDH_RESP1; break;
     case 0x840: r = sdh->SDH_ECTL; break;
     
     default: r = 0; break;
     }
 
-    fprintf(stderr, "sdh_read (offset=%lx, value=%08x)\n", offset, r);
+    //fprintf(stderr, "sdh_read (offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
