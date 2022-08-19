@@ -1806,7 +1806,9 @@ struct NUC970FmiState {
     uint8_t manf_id;
     uint8_t chip_id;
     ECCState ecc;
-
+    qemu_irq irq;
+    SDBus mmc_bus;
+    uint32_t FMI_BUFFER[32];
     uint32_t FMI_DMACTL;        // 0x400
     uint32_t FMI_DMASA;         // 0x408
     uint32_t FMI_DMABCNT;       // 0x40c
@@ -1816,6 +1818,14 @@ struct NUC970FmiState {
     uint32_t FMI_INTEN;         // 0x804
     uint32_t FMI_INTSTS;        // 0x808
     // eMMC registers           // 0x820~0x83c
+    uint32_t FMI_EMMCCTL;
+    uint32_t FMI_EMMCCMD;
+    uint32_t FMI_EMMCINTEN;
+    uint32_t FMI_EMMCINTSTS;
+    uint32_t FMI_EMMCRESP0;
+    uint32_t FMI_EMMCRESP1;
+    uint32_t FMI_EMMCBLEN;
+    uint32_t FMI_EMMCTOUT;
     uint32_t FMI_NANDCTL;       // 0x8a0
     uint32_t FMI_NANDTMCTL;     // 0x8a4
     uint32_t FMI_NANDINTEN;     // 0x8a8
@@ -2032,14 +2042,114 @@ int fmiSMCorrectData(NUC970FmiState *fmi, unsigned long uDAddr)
     return uErrorCnt;
 }
 
+static void nuc970_emmc_update_irq(NUC970FmiState* s)
+{
+    uint32_t irq;
+    if (s->FMI_CTL & (1 << 1)) {    // FMI_CTL[1]: eMMC_EN
+        irq = s->FMI_EMMCINTEN & s->FMI_EMMCINTSTS;
+    }
+    else {
+        irq = 0;
+    }
+    qemu_set_irq(s->irq, irq);
+}
+
+static int SD_Swap32(int val)
+{
+    int buf;
+
+    buf = val;
+    val <<= 24;
+    val |= (buf << 8) & 0xff0000;
+    val |= (buf >> 8) & 0xff00;
+    val |= (buf >> 24) & 0xff;
+    return val;
+}
+
+static void nuc970_emmc_send_command(NUC970FmiState* s)
+{
+    SDRequest request;
+    uint8_t resp[16];
+    int rlen;
+    memset(resp, 0, sizeof(resp));
+    
+    
+    /* Prepare request */
+    request.cmd = (s->FMI_EMMCCTL >> 8) & 0x3f; // EMMCCTL[13:8] CMD_CODE
+    request.arg = s->FMI_EMMCCMD;
+
+    /* Send request to SD bus */
+    rlen = sdbus_do_command(&s->mmc_bus, &request, resp);
+    fprintf(stderr, "mmc cmd: %08x, arg: %08x, rlen: %d, resp: %02x %02x %02x %02x\n",
+            request.cmd, request.arg, rlen,
+            resp[0], resp[1], resp[2], resp[3]);
+        if (rlen < 0) {
+            //goto error;
+        }
+
+        /* If the command has a response, store it in the response registers */
+        {
+            if (rlen == 4) {
+                s->FMI_EMMCRESP0 = resp[0] << 16 | resp[1] << 8 | resp[2]; // [47:16]
+                s->FMI_EMMCRESP1 = resp[3]; // [15:8]
+            }
+            else if (rlen == 16) {
+                s->FMI_BUFFER[0] = resp[0] << 16 | resp[1] << 8 | resp[2];
+                s->FMI_BUFFER[1] = resp[3] << 24 | resp[4] << 16 | resp[5] << 8 | resp[6];
+                s->FMI_BUFFER[2] = resp[7] << 24 | resp[8] << 16 | resp[9] << 8 | resp[10];
+                s->FMI_BUFFER[3] = resp[11] << 24 | resp[12] << 16 | resp[13] << 8 | resp[14];
+                s->FMI_BUFFER[4] = resp[15];
+
+                s->FMI_BUFFER[0] = SD_Swap32(s->FMI_BUFFER[0]);
+                s->FMI_BUFFER[1] = SD_Swap32(s->FMI_BUFFER[1]);
+                s->FMI_BUFFER[2] = SD_Swap32(s->FMI_BUFFER[2]);
+                s->FMI_BUFFER[3] = SD_Swap32(s->FMI_BUFFER[3]);
+                s->FMI_BUFFER[4] = SD_Swap32(s->FMI_BUFFER[4]);
+
+                printf(" %08x %08x %08x %08x %08x\n",
+                    s->FMI_BUFFER[0], s->FMI_BUFFER[1], s->FMI_BUFFER[2], s->FMI_BUFFER[3], s->FMI_BUFFER[4]);
+            }
+            else {
+                //goto error;
+            }
+
+        }
+    
+
+    /* Set interrupt status bits */
+    //s->irq_status |= SD_RISR_CMD_COMPLETE;
+    return;
+
+//error:
+   //s->irq_status |= SD_RISR_NO_RESPONSE;
+}
+
 static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
     unsigned size)
 {
     NUC970FmiState* fmi = (NUC970FmiState*)opaque;
     uint32_t r = 0;
     switch (offset) {
+    case 0x000 ... 0x07c:
+        r = fmi->FMI_BUFFER[offset / 4];
+        break;
     case 0x400: r = fmi->FMI_DMACTL; break;
     case 0x800: r = fmi->FMI_CTL; break;
+    case 0x820:
+        r = fmi->FMI_EMMCCTL & ~(0x7f); // auto clear CO/RI/DI/DO/R2/CLK74/CLK8
+        break;
+    case 0x828:
+        r = fmi->FMI_EMMCINTEN;
+        break;
+    case 0x82c:
+        r = fmi->FMI_EMMCINTSTS | (1 << 7) | (1 << 3) | (1 << 2);  // alway ok DAT0/CRC16/CRC7
+        break;
+    case 0x830:
+        r = fmi->FMI_EMMCRESP0;
+        break;
+    case 0x834:
+        r = fmi->FMI_EMMCRESP1;
+        break;
     case 0x8a0:
         //fprintf(stderr, "FMI_NANDCTL: %08x\n", fmi->FMI_NANDCTL);
         r = fmi->FMI_NANDCTL & ~(1); // clear SR_RST BIT
@@ -2079,7 +2189,7 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
         break;
     }
 
-    //fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
+    fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -2087,8 +2197,9 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970FmiState* fmi = (NUC970FmiState*)opaque;
+    uint8_t blkbuf[2048];
     int ryby = 0;
-    //fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
+    fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
     case 0x400:
@@ -2101,7 +2212,50 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         fmi->FMI_DMAINTEN = value;
         break;
     case 0x800:
+        if (value & (1 << 0)) { // SW_RST
+            value &= ~(1 << 0); // clear
+        }
         fmi->FMI_CTL = value;
+        break;
+    case 0x820:
+        if (value & (1 << 14)) {    // SW_RST
+            value &= ~(1 << 14);    // clear
+        }
+        if (value & (1 << 0)) { // CO_EN
+            nuc970_emmc_send_command(fmi);
+        }
+        if (value & (1 << 2)) {
+            sdbus_read_data(&fmi->mmc_bus, blkbuf, fmi->FMI_EMMCBLEN + 1);
+            //DumpHex(blkbuf, fmi->FMI_EMMCBLEN + 1);
+            dma_memory_write(&address_space_memory, fmi->FMI_DMASA, blkbuf,
+                fmi->FMI_EMMCBLEN + 1, MEMTXATTRS_UNSPECIFIED);
+            fmi->FMI_EMMCINTSTS |= (1 << 0);    // BLKD_IF
+        }
+        else if (value & (1 << 3)) {
+            dma_memory_read(&address_space_memory, fmi->FMI_DMASA, blkbuf,
+                fmi->FMI_EMMCBLEN + 1, MEMTXATTRS_UNSPECIFIED);
+            //DumpHex(blkbuf, fmi->FMI_EMMCBLEN + 1);
+            sdbus_write_data(&fmi->mmc_bus, blkbuf, fmi->FMI_EMMCBLEN + 1);
+            fmi->FMI_EMMCINTSTS |= (1 << 0);
+        }        
+        fmi->FMI_EMMCCTL = value;
+        nuc970_emmc_update_irq(fmi);
+        break;
+    case 0x824:
+        fmi->FMI_EMMCCMD = value;
+        break;
+    case 0x828:
+        fmi->FMI_EMMCINTEN = value;
+        break;
+    case 0x82c:
+        if (value & (0x3003)) { // auto clear BLKD_IF/CRC_IF/RITO_IF/DITO_IF
+            value &= ~(value & (0x3003));
+        }
+        fmi->FMI_EMMCINTSTS = value;
+        nuc970_emmc_update_irq(fmi);
+        break;
+    case 0x838:
+        fmi->FMI_EMMCBLEN = value;
         break;
     case 0x8a0:
         if (value & (1 << 0)) {  // Software Engine Reset
@@ -2209,7 +2363,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         fmi->FMI_NANDRA[(offset - 0xa00) / 4] = value;
         break;
     default:
-        //fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
+        fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
         break;
     }
 }
@@ -2228,6 +2382,25 @@ static void nuc970_fmi_init(Object* obj)
     memory_region_init_io(&fmi->iomem, OBJECT(fmi), &nuc970_fmi_ops, fmi,
         "nuc970-fmi", 0x1000);
     sysbus_init_mmio(sd, &fmi->iomem);
+    sysbus_init_irq(sd, &fmi->irq);
+    qbus_init(&fmi->mmc_bus, sizeof(fmi->mmc_bus), TYPE_SD_BUS,
+        DEVICE(sd), "sd-bus");
+
+    /* Retrieve SD bus */
+    DriveInfo *di = drive_get(IF_SD, 0, 1);
+
+    if (di) {
+        BlockBackend *blk = di ? blk_by_legacy_dinfo(di) : NULL;
+        if (blk) {
+            printf("eMMC size: %ld\n", blk_getlength(blk));
+        }
+        /* Plug in SD card */
+        DeviceState* carddev = qdev_new(TYPE_SD_CARD);
+        qdev_prop_set_drive_err(carddev, "drive", blk, &error_fatal);
+        BusState* bus = qdev_get_child_bus(DEVICE(sd), "sd-bus");
+        qdev_realize_and_unref(carddev, bus, &error_fatal);
+    }
+
     fmi->FMI_CTL = 0x0;
     fmi->FMI_NANDTMCTL = 0x00010105;
     fmi->FMI_NANDCTL = 0x1E880090;
@@ -2235,6 +2408,14 @@ static void nuc970_fmi_init(Object* obj)
     fmi->FMI_NANDCMD = 0x0;
     fmi->FMI_NANDADDR = 0x0;
     fmi->FMI_NANDECTL = 0x0;
+
+    fmi->FMI_EMMCCTL = 0x01010000;
+    fmi->FMI_EMMCCMD = 0x0;
+    fmi->FMI_EMMCINTEN = 0x0;
+    fmi->FMI_EMMCINTSTS = 0x0000008c;
+    fmi->FMI_EMMCBLEN = 0x000001ff;
+    fmi->FMI_EMMCTOUT = 0;
+
     ecc_reset(&fmi->ecc);
 }
 
@@ -2533,7 +2714,6 @@ struct NUC970SdhState {
     uint32_t transfer_cnt;
 
     qemu_irq irq;
-    BlockBackend* blk;
     SDBus sdbus;
 
     uint32_t SDH_FB[32];    //
@@ -2560,16 +2740,18 @@ struct NUC970SdhState {
 #define TYPE_NUC970_SDH "nuc970-sdh"
 OBJECT_DECLARE_SIMPLE_TYPE(NUC970SdhState, NUC970_SDH)
 
-static int SD_Swap32(int val)
-{
-    int buf;
 
-    buf = val;
-    val <<= 24;
-    val |= (buf << 8) & 0xff0000;
-    val |= (buf >> 8) & 0xff00;
-    val |= (buf >> 24) & 0xff;
-    return val;
+
+static void nuc970_sdhost_update_irq(NUC970SdhState* s)
+{
+    uint32_t irq;
+    if (s->SDH_GCTL & SDH_GCTL_SDEN_Msk) {
+        irq = s->SDH_INTSTS & s->SDH_INTEN;
+    }
+    else {
+        irq = 0;
+    }    
+    qemu_set_irq(s->irq, irq);
 }
 
 static void nuc970_sdhost_send_command(NUC970SdhState* s)
@@ -2595,7 +2777,8 @@ static void nuc970_sdhost_send_command(NUC970SdhState* s)
 
         /* Send request to SD bus */
         rlen = sdbus_do_command(&s->sdbus, &request, resp);
-        fprintf(stderr, "sdbus_do_command, arg: %08x, rlen: %d, resp: %02x %02x %02x %02x\n", request.arg, rlen,
+        fprintf(stderr, "sdbus_do_command, cmd: %08x, arg: %08x, rlen: %d, resp: %02x %02x %02x %02x\n",
+            request.cmd, request.arg, rlen,
             resp[0], resp[1], resp[2], resp[3]);
         if (rlen < 0) {
             //goto error;
@@ -2624,7 +2807,7 @@ static void nuc970_sdhost_send_command(NUC970SdhState* s)
                 s->SDH_FB[2] = SD_Swap32(s->SDH_FB[2]);
                 s->SDH_FB[3] = SD_Swap32(s->SDH_FB[3]);
                 s->SDH_FB[4] = SD_Swap32(s->SDH_FB[4]);
-
+                
                 printf(" %08x %08x %08x %08x %08x\n", 
                     s->SDH_FB[0], s->SDH_FB[1], s->SDH_FB[2], s->SDH_FB[3], s->SDH_FB[4]);
                 //s->response[0] = ldl_be_p(&resp[12]);
@@ -2654,8 +2837,12 @@ static uint64_t nuc970_sdh_read(void* opaque, hwaddr offset,
     NUC970SdhState* sdh = (NUC970SdhState*)opaque;
     uint32_t r = 0;
     switch (offset) {
-    case 0x00 ... 0x7c:
+    case 0x00 ... 0x7c:        
         r = sdh->SDH_FB[offset / 4];
+        if (offset % 4 != 0) {
+            r = (r >> (offset % 4) * 8) & 0xff;
+        }
+        //fprintf(stderr, "sdh_read (offset=%lx, value=%08x, size=%d)\n", offset, r, size);
         break;
     case 0x400: r = sdh->SDH_DMACTL & ~(1<<1); break;
     case 0x800: r = sdh->SDH_GCTL & ~(1<<0); break;
@@ -2665,7 +2852,7 @@ static uint64_t nuc970_sdh_read(void* opaque, hwaddr offset,
         //r &= ~(1 << 6); // clear CLK8_OE
         //r &= ~(1 << 5); // clear CLK74_OE
         //r &= ~(1 << 14);
-        r &= ~(0x407f);
+        r &= ~(0x407f); // CO/RI/DI/DO/R2/CLK74/CLK8/SW_RST
         break;
     case 0x828: r = sdh->SDH_INTEN; break;
     case 0x82c: 
@@ -2689,42 +2876,51 @@ static void nuc970_sdh_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970SdhState* sdh = (NUC970SdhState*)opaque;
-    fprintf(stderr, "sdh_write(offset=%lx, value=%08lx)\n", offset, value);
+    uint8_t blkbuf[2048];   // maximum 11-bit blk length
+    //fprintf(stderr, "sdh_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
     case 0x400:
         sdh->SDH_DMACTL = value;
+        break;
+    case 0x408:
+        sdh->SDH_DMASA = value;
         break;
     case 0x800:
         sdh->SDH_GCTL = value;
         break;
     case 0x820:
         sdh->SDH_CTL = value;
-        fprintf(stderr, "%08lx CMD_CODE: 0x%02lx\n", value, (value >> 8) & 0x3f);
+        //fprintf(stderr, "%08lx CMD_CODE: 0x%02lx\n", value, (value >> 8) & 0x3f);
         /* the execution priority will be 
            CLK74_OE(SDH_CTL[5]), CO_EN(SDH_CTL[0]), RI_EN(SDH_CTL[1])/R2_EN(SDH_CTL[4]), 
            and then CLK8_OE(SDH_CTL[6]). Please note that RI_EN(SDH_CTL[1]) and R2_EN(SDH_CTL[4]) 
            can’t be triggered at the same time.*/
-        if (value & (1 << 5)) {
-            printf(" CLK74_OE...\n");            
+        if (value & (1 << SDH_CTL_CLK74OEN_Pos)) {
+            //printf(" CLK74_OE...\n");            
         }
-        if (value & (1 << 0))
-        {
+        if (value & (1 << SDH_CTL_COEN_Pos)) {
             nuc970_sdhost_send_command(sdh);
         }
-
         if (value & SDH_CTL_CLK8OEN_Msk) {
-            
             
         }
 
         if (value & SDH_CTL_DIEN_Msk) {
-            uint8_t buf[512];
-            //nuc970_sdhost_send_command(sdh);
-
-            sdbus_read_data(&sdh->sdbus, buf, 512);
-            DumpHex(buf, sizeof(buf));
+            sdbus_read_data(&sdh->sdbus, blkbuf, sdh->SDH_BLEN + 1);
+            //DumpHex(blkbuf, sdh->SDH_BLEN + 1);
+            dma_memory_write(&address_space_memory, sdh->SDH_DMASA, blkbuf,
+                sdh->SDH_BLEN + 1, MEMTXATTRS_UNSPECIFIED);
+            sdh->SDH_INTSTS |= SDH_INTSTS_BLKDIF_Msk;
         }
+        else if (value & SDH_CTL_DOEN_Msk) {
+            dma_memory_read(&address_space_memory, sdh->SDH_DMASA, blkbuf, 
+                sdh->SDH_BLEN + 1, MEMTXATTRS_UNSPECIFIED);
+            //DumpHex(blkbuf, sdh->SDH_BLEN + 1);
+            sdbus_write_data(&sdh->sdbus, blkbuf, sdh->SDH_BLEN + 1);
+            sdh->SDH_INTSTS |= SDH_INTSTS_BLKDIF_Msk;
+        }
+        nuc970_sdhost_update_irq(sdh);
         break;
     case 0x824:
         sdh->SDH_CMD = value;
@@ -2733,7 +2929,15 @@ static void nuc970_sdh_write(void* opaque, hwaddr offset,
         sdh->SDH_INTEN = value;
         break;
     case 0x82c:
+        if (value & SDH_INTSTS_BLKDIF_Msk)
+            value &= ~(1 << SDH_INTSTS_BLKDIF_Pos);
+        if (value & SDH_INTSTS_CRCIF_Msk)
+            value &= ~(1 << SDH_INTSTS_CRCIF_Pos);
         sdh->SDH_INTSTS = value;
+        nuc970_sdhost_update_irq(sdh);
+        break;
+    case 0x838:
+        sdh->SDH_BLEN = value & 0x7ff;  // 11-bits block length
         break;
     case 0x840:
         sdh->SDH_ECTL = value;
@@ -2770,19 +2974,24 @@ static void nuc970_sdh_init(Object* obj)
 
     /* Retrieve SD bus */
     di = drive_get(IF_SD, 0, 0);
-    blk = di ? blk_by_legacy_dinfo(di) : NULL;
+    
+    if (di) {
+        blk = di ? blk_by_legacy_dinfo(di) : NULL;
 
-    /* Plug in SD card */
-    carddev = qdev_new(TYPE_SD_CARD);
-    qdev_prop_set_drive_err(carddev, "drive", blk, &error_fatal);
-    bus = qdev_get_child_bus(DEVICE(sd), "sd-bus");
-    qdev_realize_and_unref(carddev, bus, &error_fatal);
-
+        /* Plug in SD card */
+        carddev = qdev_new(TYPE_SD_CARD);
+        qdev_prop_set_drive_err(carddev, "drive", blk, &error_fatal);
+        bus = qdev_get_child_bus(DEVICE(sd), "sd-bus");
+        qdev_realize_and_unref(carddev, bus, &error_fatal);
+    }
     sdh->SDH_DMACTL = 0x00000000;
     sdh->SDH_GCTL = 0x00000000;
     sdh->SDH_CTL = 0x01010000;
-    sdh->SDH_INTEN = 0x40000A00;
-    sdh->SDH_INTSTS = 0x013E00AC;
+    sdh->SDH_INTEN = 0x40000A00;    // INTEN[30]=1 SD0_nCD for card detection
+    sdh->SDH_INTSTS = 0x013F00AC;   // INTEN[16] CDPS0: 1 card removed
+    if (di != NULL) {
+        sdh->SDH_INTSTS &= ~(1 << SDH_INTSTS_CDSTS0_Pos); // CDPS0: 0 card inserted.
+    }
     sdh->SDH_ECTL = 0x00000003;
 
     /*
@@ -3113,7 +3322,13 @@ static void nuc970_init(MachineState* machine)
     
     sysbus_create_simple(TYPE_NUC970_WDT, WDT_BA, NULL);
     sysbus_create_simple("nuc970.rng", CRPT_BA, NULL);
-    sysbus_create_simple(TYPE_NUC970_FMI, FMI_BA, NULL);
+    //sysbus_create_simple(TYPE_NUC970_FMI, FMI_BA, NULL);
+    dev = qdev_new(TYPE_NUC970_FMI);
+    s = SYS_BUS_DEVICE(dev);
+    sysbus_realize(s, &error_abort);
+    sysbus_mmio_map(s, 0, FMI_BA);
+    sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, FMI_IRQn));
+
 
     dev = qdev_new(TYPE_NPCM7XX_EMC);
     s = SYS_BUS_DEVICE(dev);
