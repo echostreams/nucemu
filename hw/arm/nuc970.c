@@ -40,6 +40,8 @@
 #include "hw/sd/sd.h"
 #include "hw/sd/sdhci.h"
 #include "hw/loader.h"
+#include "hw/usb/hcd-ohci.h"
+#include "hw/usb/hcd-ehci.h"
 
 #define MP_MISC_BASE            0x80002000
 #define MP_MISC_SIZE            0x00001000
@@ -2071,8 +2073,7 @@ static void nuc970_emmc_send_command(NUC970FmiState* s)
     SDRequest request;
     uint8_t resp[16];
     int rlen;
-    memset(resp, 0, sizeof(resp));
-    
+    memset(resp, 0, sizeof(resp));    
     
     /* Prepare request */
     request.cmd = (s->FMI_EMMCCTL >> 8) & 0x3f; // EMMCCTL[13:8] CMD_CODE
@@ -2221,6 +2222,8 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         if (value & (1 << 14)) {    // SW_RST
             value &= ~(1 << 14);    // clear
         }
+        fmi->FMI_EMMCCTL = value;
+
         if (value & (1 << 0)) { // CO_EN
             nuc970_emmc_send_command(fmi);
         }
@@ -2238,7 +2241,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
             sdbus_write_data(&fmi->mmc_bus, blkbuf, fmi->FMI_EMMCBLEN + 1);
             fmi->FMI_EMMCINTSTS |= (1 << 0);
         }        
-        fmi->FMI_EMMCCTL = value;
+        
         nuc970_emmc_update_irq(fmi);
         break;
     case 0x824:
@@ -3374,7 +3377,7 @@ static void nuc970_init(MachineState* machine)
     create_unimplemented_device("nuc970.gdma", GDMA_BA, 0x1000);
     create_unimplemented_device("nuc970.ebi", EBI_BA, 0x800);
     create_unimplemented_device("nuc970.emc1", EMC1_BA, 0x1000);
-    create_unimplemented_device("nuc970.ehci", USBH_BA, 0x1000);
+    //create_unimplemented_device("nuc970.ehci", USBH_BA, 0x1000);
     create_unimplemented_device("nuc970.usbd", USBD_BA, 0x1000);
     create_unimplemented_device("nuc970.ohci", USBO_BA, 0x1000);
     create_unimplemented_device("nuc970.i2s", ACTL_BA, 0x1000);
@@ -3397,6 +3400,29 @@ static void nuc970_init(MachineState* machine)
     create_unimplemented_device("nuc970.can1", CAN1_BA, 0x400);
     create_unimplemented_device("nuc970.mtp", MTP_BA, 0x1000);
 
+    {
+        dev = qdev_new(TYPE_PLATFORM_EHCI);
+        //object_initialize_child(obj, "ehci[*]", &s->ehci[i],
+        //    TYPE_PLATFORM_EHCI);
+        object_property_set_bool(OBJECT(dev), "companion-enable",
+            true, &error_fatal);
+        sysbus_realize(SYS_BUS_DEVICE(dev), &error_fatal);
+        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, USBH_BA);
+        sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
+            qdev_get_gpio_in(aic, EHCI_IRQn));
+
+        //object_initialize_child(obj, "ohci[*]", &s->ohci[i],
+        //    TYPE_SYSBUS_OHCI);
+        //object_property_set_str(OBJECT(&s->ohci[i]), "masterbus", bus,
+        //    &error_fatal);
+        //sysbus_realize(SYS_BUS_DEVICE(&s->ohci[i]), &error_fatal);
+        //sysbus_mmio_map(SYS_BUS_DEVICE(&s->ohci[i]), 0,
+        //    AW_A10_OHCI_BASE + i * 0x8000);
+        //sysbus_connect_irq(SYS_BUS_DEVICE(&s->ohci[i]), 0,
+        //    qdev_get_gpio_in(dev, 64 + i));
+         
+        
+    }
     /* If the user specified a -bios image, we put it to 0xe00000 and bypass
      * the normal Linux boot process. 
      */
