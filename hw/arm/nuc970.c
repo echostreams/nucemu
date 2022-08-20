@@ -1,5 +1,13 @@
 /*
  * nuc970 emulation.
+ * 
+ * if=sd,index=0    SDH SD Card
+ * if=sd,index=1    FMI EMMC
+ * if=mtd,index=0   SPI Flash
+ * if=mtd,index=1   FMI NAND
+ * if=none,index=0  I2C
+ * if=none,index=*  others(USB...)
+ * 
  */
 
 #include "qemu/osdep.h"
@@ -3379,7 +3387,7 @@ static void nuc970_init(MachineState* machine)
     create_unimplemented_device("nuc970.emc1", EMC1_BA, 0x1000);
     //create_unimplemented_device("nuc970.ehci", USBH_BA, 0x1000);
     create_unimplemented_device("nuc970.usbd", USBD_BA, 0x1000);
-    create_unimplemented_device("nuc970.ohci", USBO_BA, 0x1000);
+    //create_unimplemented_device("nuc970.ohci", USBO_BA, 0x1000);
     create_unimplemented_device("nuc970.i2s", ACTL_BA, 0x1000);
     create_unimplemented_device("nuc970.jpeg", JPEG_BA, 0x1000);
     create_unimplemented_device("nuc970.ge2d", GE_BA, 0x1000);
@@ -3401,6 +3409,10 @@ static void nuc970_init(MachineState* machine)
     create_unimplemented_device("nuc970.mtp", MTP_BA, 0x1000);
 
     {
+        /* attach a usb-storage(id=stick) to usb-bus.0
+        *  -drive file=/path/to/usbimg,if=none,id=stick,format=raw,index=1 // index=0 used by i2c eeprom
+        *  -device usb-storage,bus=usb-bus.0,drive=stick
+        */
         dev = qdev_new(TYPE_PLATFORM_EHCI);
         //object_initialize_child(obj, "ehci[*]", &s->ehci[i],
         //    TYPE_PLATFORM_EHCI);
@@ -3411,16 +3423,13 @@ static void nuc970_init(MachineState* machine)
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
             qdev_get_gpio_in(aic, EHCI_IRQn));
 
+        dev = qdev_new(TYPE_SYSBUS_OHCI);
         //object_initialize_child(obj, "ohci[*]", &s->ohci[i],
         //    TYPE_SYSBUS_OHCI);
-        //object_property_set_str(OBJECT(&s->ohci[i]), "masterbus", bus,
-        //    &error_fatal);
-        //sysbus_realize(SYS_BUS_DEVICE(&s->ohci[i]), &error_fatal);
-        //sysbus_mmio_map(SYS_BUS_DEVICE(&s->ohci[i]), 0,
-        //    AW_A10_OHCI_BASE + i * 0x8000);
-        //sysbus_connect_irq(SYS_BUS_DEVICE(&s->ohci[i]), 0,
-        //    qdev_get_gpio_in(dev, 64 + i));
-         
+        object_property_set_str(OBJECT(dev), "masterbus", "usb-bus.0", &error_fatal);
+        sysbus_realize(SYS_BUS_DEVICE(dev), &error_fatal);
+        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, USBO_BA);
+        sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0, qdev_get_gpio_in(aic, OHCI_IRQn));         
         
     }
     /* If the user specified a -bios image, we put it to 0xe00000 and bypass
