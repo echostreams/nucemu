@@ -42,6 +42,7 @@
 #include "hw/char/nuc970_uart.h"
 #include "hw/intc/nuc970_aic.h"
 #include "hw/timer/nuc970_timer.h"
+#include "hw/timer/nuc970_timer2.h" // etimer
 #include "hw/net/nuc970_emc.h"
 #include "hw/i2c/nuc970_i2c.h"
 #include "hw/arm/nuc970.h"
@@ -3082,6 +3083,22 @@ static const int nuc970_tim_irq[] = {
     TMR4_IRQn
 };
 
+/* Register base address for each Timer Module */
+static const hwaddr nuc970_etmr_addr[] = {
+    ETMR0_BA,
+    ETMR1_BA,
+    ETMR2_BA,
+    ETMR3_BA
+};
+
+/* Register base address for each Timer Module */
+static const int nuc970_etmr_irq[] = {
+    ETMR0_IRQn,
+    ETMR1_IRQn,
+    ETMR2_IRQn,
+    ETMR3_IRQn
+};
+
 #define INIT_SHADOW_REGION 1
 
 /*
@@ -3303,6 +3320,15 @@ static void nuc970_init(MachineState* machine)
             }         
                         
         }
+
+        for (i = 0; i < 4; i++)
+        {
+            dev = qdev_new(TYPE_NUC970_ETIMER);
+            SysBusDevice* sbd = SYS_BUS_DEVICE(dev);
+            sysbus_realize(sbd, &error_abort);
+            sysbus_mmio_map(sbd, 0, nuc970_etmr_addr[i]);
+            sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(aic, nuc970_etmr_irq[i]));
+        }
     }
 #endif
     
@@ -3392,10 +3418,10 @@ static void nuc970_init(MachineState* machine)
     create_unimplemented_device("nuc970.jpeg", JPEG_BA, 0x1000);
     create_unimplemented_device("nuc970.ge2d", GE_BA, 0x1000);
     create_unimplemented_device("nuc970.cap", CAP_BA, 0x1000);
-    create_unimplemented_device("nuc970.etimer0", ETMR0_BA, 0x100);
-    create_unimplemented_device("nuc970.etimer1", ETMR1_BA, 0x100);
-    create_unimplemented_device("nuc970.etimer2", ETMR2_BA, 0x100);
-    create_unimplemented_device("nuc970.etimer3", ETMR3_BA, 0x100);
+    //create_unimplemented_device("nuc970.etimer0", ETMR0_BA, 0x100);
+    //create_unimplemented_device("nuc970.etimer1", ETMR1_BA, 0x100);
+    //create_unimplemented_device("nuc970.etimer2", ETMR2_BA, 0x100);
+    //create_unimplemented_device("nuc970.etimer3", ETMR3_BA, 0x100);
     create_unimplemented_device("nuc970.wwdt", WWDT_BA, 0x100);
     create_unimplemented_device("nuc970.sc0", SC0_BA, 0x400);
     create_unimplemented_device("nuc970.sc1", SC1_BA, 0x400);

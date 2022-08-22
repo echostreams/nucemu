@@ -14,7 +14,7 @@
 #include "hw/qdev-properties.h"
 
 #ifndef DEBUG_NUC970_I2C
-#define DEBUG_NUC970_I2C 0
+#define DEBUG_NUC970_I2C 1
 #endif
 
 #define DPRINTF(fmt, args...) \

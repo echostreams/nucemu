@@ -26,7 +26,7 @@
 #include "qemu/module.h"
 #include "qom/object.h"
 
-#define DEBUG_NUC970_RNG 0
+#define DEBUG_NUC970_RNG 1
 
 #define DPRINTF(fmt, ...) \
     do { \
@@ -114,10 +114,26 @@ static void exynos4210_rng_set_seed(NUC970RngState* s, unsigned int i,
     }
 }
 
+static int getKeySize(NUC970RngState* s)
+{
+    switch (s->keysz)
+    {
+    case 0:
+        return 8;
+    case 1:
+        return 16;
+    case 2:
+        return 24;
+    case 3:
+        return 32;
+    default:
+        return 8;
+    }    
+}
+
 static void exynos4210_rng_run_engine(NUC970RngState* s)
 {
     Error* err = NULL;
-
     /* Seed set? */
     //if ((s->reg_status & NUC970_RNG_STATUS_SEED_SETTING_DONE) == 0) {
     //    goto out;
@@ -134,7 +150,13 @@ static void exynos4210_rng_run_engine(NUC970RngState* s)
     //}
 
     /* Get randoms */
-    if (qemu_guest_getrandom(s->randr_value, sizeof(s->randr_value), &err)) {
+    /*PRNG Generate Key Size
+        0 = 64 bits.     8 bytes
+        1 = 128 bits.   16 bytes;
+        2 = 192 bits.   24 bytes;
+        3 = 256 bits.   32 bytes;
+    */
+    if (qemu_guest_getrandom(s->randr_value, (s->keysz + 1) * 8, &err)) {
         error_report_err(err);
     }
     else {
@@ -198,7 +220,7 @@ static void exynos4210_rng_write(void* opaque, hwaddr offset,
     case NUC970_RNG_CONTROL_1:
         DPRINTF("RNG_CONTROL_1 = 0x%" PRIx64 "\n", val);
         s->reg_control = val;
-        exynos4210_rng_run_engine(s);
+        
         break;
 
     case NUC970_RNG_STATUS:
@@ -207,6 +229,9 @@ static void exynos4210_rng_write(void* opaque, hwaddr offset,
         //s->reg_status |= val & NUC970_RNG_STATUS_WRITE_MASK;
         s->keysz = (val >> 2) & 0x03;
         s->reload = (val >> 1) & 0x01;
+        if (s->reload) {
+            srand(s->seed_set);
+        }
         if (val & 0x01) {
             s->busy = 1;
             exynos4210_rng_run_engine(s);
@@ -214,16 +239,6 @@ static void exynos4210_rng_write(void* opaque, hwaddr offset,
         break;
     case 0xc:
         s->seed_set = val;
-        break;
-
-    case NUC970_RNG_SEED_IN_OFFSET(0):
-    case NUC970_RNG_SEED_IN_OFFSET(1):
-    case NUC970_RNG_SEED_IN_OFFSET(2):
-    case NUC970_RNG_SEED_IN_OFFSET(3):
-    case NUC970_RNG_SEED_IN_OFFSET(4):
-        exynos4210_rng_set_seed(s,
-            (offset - NUC970_RNG_SEED_IN_OFFSET(0)) / 4,
-            val);
         break;
 
     default:
