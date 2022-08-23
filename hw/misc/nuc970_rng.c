@@ -1,7 +1,7 @@
 /*
- *  Exynos4210 Pseudo Random Nubmer Generator Emulation
+ *  NUC970 Pseudo Random Nubmer Generator Emulation
  *
- *  Copyright (c) 2017 Krzysztof Kozlowski <krzk@kernel.org>
+ *  Copyright (c) 2022 Steven Deng <zihui89w@yahoo.com>
  *
  *  This program is free software; you can redistribute it and/or modify it
  *  under the terms of the GNU General Public License as published by the
@@ -26,7 +26,7 @@
 #include "qemu/module.h"
 #include "qom/object.h"
 
-#define DEBUG_NUC970_RNG 1
+#define DEBUG_NUC970_RNG 0
 
 #define DPRINTF(fmt, ...) \
     do { \
@@ -39,7 +39,7 @@
 OBJECT_DECLARE_SIMPLE_TYPE(NUC970RngState, NUC970_RNG)
 
 /*
- * Exynos4220, PRNG, only polling mode is supported.
+ * NUC970, PRNG, only polling mode is supported.
  */
 
  /* RNG_CONTROL_1 register bitfields, reset value: 0x0 */

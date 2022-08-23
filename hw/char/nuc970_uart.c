@@ -389,6 +389,8 @@ static void nuc970_uart_update_irq(NUC970UartState* s)
 	//	s->reg[I_(UA_ISR)], s->reg[I_(UA_IER)]);
 
 	if (interrupt) {
+		//fprintf(stderr, " uart[%d] interrupt: %x (%08x & %08x)\n", s->channel, interrupt,
+		//		s->reg[I_(UA_ISR)], s->reg[I_(UA_IER)]);
 		qemu_irq_raise(s->irq);
 		trace_exynos_uart_irq_raised(s->channel, s->reg[I_(UA_ISR)]);
 	}
@@ -547,12 +549,12 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
 		if (val & UFCON_Rx_FIFO_RESET) {
 			fifo_reset(&s->rx);
 			s->reg[I_(UA_FCR)] &= ~UFCON_Rx_FIFO_RESET;
-			trace_exynos_uart_rx_fifo_reset(s->channel);
+			//trace_exynos_uart_rx_fifo_reset(s->channel);
 		}
 		if (val & UFCON_Tx_FIFO_RESET) {
 			fifo_reset(&s->tx);
 			s->reg[I_(UA_FCR)] &= ~UFCON_Tx_FIFO_RESET;
-			trace_exynos_uart_tx_fifo_reset(s->channel);
+			//trace_exynos_uart_tx_fifo_reset(s->channel);
 		}
 		break;
 

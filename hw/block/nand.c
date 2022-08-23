@@ -610,9 +610,9 @@ uint32_t nand_getio(DeviceState* dev)
             s->iolen = (1 << s->page_shift) - offset;
         else
             s->iolen = (1 << s->page_shift) + (1 << s->oob_shift) - offset;
-        printf(" >> blk_load: %08lx, %08x, page_shift: %d, oob_shift: %d\n", 
-            s->addr, offset, s->page_shift, s->oob_shift
-        );
+        //printf(" >> blk_load: %08lx, %08x, page_shift: %d, oob_shift: %d\n", 
+        //    s->addr, offset, s->page_shift, s->oob_shift
+        //);
     }
 
     if (s->ce || s->iolen <= 0) {
@@ -797,7 +797,7 @@ static void glue(nand_blk_load_, NAND_PAGE_SIZE)(NANDFlashState* s,
             s->ioaddr = s->io + SECTOR_OFFSET(s->addr) + offset;
         }
         else {
-            printf("%s: read %08lx, %08x\n", __func__, PAGE_START(addr), (PAGE_SECTORS + 2) << BDRV_SECTOR_BITS);
+            //printf("%s: read %08lx, %08x\n", __func__, PAGE_START(addr), (PAGE_SECTORS + 2) << BDRV_SECTOR_BITS);
             
             if (blk_pread(s->blk, PAGE_START(addr), s->io,
                 (PAGE_SECTORS + 2) << BDRV_SECTOR_BITS) < 0) {

@@ -2062,7 +2062,7 @@ static void nuc970_emmc_update_irq(NUC970FmiState* s)
     else {
         irq = 0;
     }
-    qemu_set_irq(s->irq, irq);
+    qemu_set_irq(s->irq, irq ? 1 : 0);
 }
 
 static int SD_Swap32(int val)
@@ -2199,7 +2199,7 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
         break;
     }
 
-    fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
+    //fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -2209,7 +2209,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     NUC970FmiState* fmi = (NUC970FmiState*)opaque;
     uint8_t blkbuf[2048];
     int ryby = 0;
-    fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
+    //fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
     case 0x400:
@@ -2371,7 +2371,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         break;
 
     case 0xa00 ... 0xbd4:
-        fprintf(stderr, "NANDRA (offset=%lx, value=%08lx)\n", offset, value);
+        //fprintf(stderr, "NANDRA (offset=%lx, value=%08lx, size=%d)\n", offset, value, size);
         fmi->FMI_NANDRA[(offset - 0xa00) / 4] = value;
         break;
     default:
@@ -2758,11 +2758,12 @@ static void nuc970_sdhost_update_irq(NUC970SdhState* s)
 {
     uint32_t irq;
     if (s->SDH_GCTL & SDH_GCTL_SDEN_Msk) {
-        irq = s->SDH_INTSTS & s->SDH_INTEN;
+        irq = s->SDH_INTSTS & s->SDH_INTEN;        
     }
     else {
         irq = 0;
-    }    
+    }
+    fprintf(stderr, "irq: %d, SDH INTSTS %08x, INTEN %08x\n", irq, s->SDH_INTSTS, s->SDH_INTEN);
     qemu_set_irq(s->irq, irq);
 }
 
@@ -2880,7 +2881,7 @@ static uint64_t nuc970_sdh_read(void* opaque, hwaddr offset,
     default: r = 0; break;
     }
 
-    //fprintf(stderr, "sdh_read (offset=%lx, value=%08x)\n", offset, r);
+    fprintf(stderr, "sdh_read (offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -2889,7 +2890,7 @@ static void nuc970_sdh_write(void* opaque, hwaddr offset,
 {
     NUC970SdhState* sdh = (NUC970SdhState*)opaque;
     uint8_t blkbuf[2048];   // maximum 11-bit blk length
-    //fprintf(stderr, "sdh_write(offset=%lx, value=%08lx)\n", offset, value);
+    fprintf(stderr, "sdh_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
     case 0x400:
@@ -2904,6 +2905,9 @@ static void nuc970_sdh_write(void* opaque, hwaddr offset,
     case 0x820:
         sdh->SDH_CTL = value;
         //fprintf(stderr, "%08lx CMD_CODE: 0x%02lx\n", value, (value >> 8) & 0x3f);
+        if (value & BIT(14)) {  // SW_RST
+
+        }
         /* the execution priority will be 
            CLK74_OE(SDH_CTL[5]), CO_EN(SDH_CTL[0]), RI_EN(SDH_CTL[1])/R2_EN(SDH_CTL[4]), 
            and then CLK8_OE(SDH_CTL[6]). Please note that RI_EN(SDH_CTL[1]) and R2_EN(SDH_CTL[4]) 
@@ -2941,12 +2945,24 @@ static void nuc970_sdh_write(void* opaque, hwaddr offset,
         sdh->SDH_INTEN = value;
         break;
     case 0x82c:
+        /*
         if (value & SDH_INTSTS_BLKDIF_Msk)
             value &= ~(1 << SDH_INTSTS_BLKDIF_Pos);
         if (value & SDH_INTSTS_CRCIF_Msk)
             value &= ~(1 << SDH_INTSTS_CRCIF_Pos);
-        sdh->SDH_INTSTS = value;
+        if (value & SDH_INTSTS_CDIF0_Msk)
+            value &= ~(1 << SDH_INTSTS_CDIF0_Pos);
+        if (value & SDH_INTSTS_CDIF1_Msk)
+            value &= ~(1 << SDH_INTSTS_CDIF1_Pos);
+        if (value & SDH_INTSTS_SDHOST0IF_Msk)
+            value &= ~(1 << SDH_INTSTS_SDHOST0IF_Pos);
+        */
+        if (value & 0x3f03) {   // other fields are read only
+            sdh->SDH_INTSTS &= ~(value & 0x3f03);
+        }    
+        
         nuc970_sdhost_update_irq(sdh);
+        
         break;
     case 0x838:
         sdh->SDH_BLEN = value & 0x7ff;  // 11-bits block length

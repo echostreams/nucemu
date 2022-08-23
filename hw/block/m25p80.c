@@ -688,7 +688,7 @@ static void complete_collecting_data(Flash* s)
     trace_m25p80_complete_collecting(s, s->cmd_in_progress, n, s->ear,
         s->cur_addr);
 
-    fprintf(stderr, "  m25p80_complete_collecting: cmd %02x, cur_addr %08x\n", s->cmd_in_progress, s->cur_addr);
+    //fprintf(stderr, "  m25p80_complete_collecting: cmd %02x, cur_addr %08x\n", s->cmd_in_progress, s->cur_addr);
 
     switch (s->cmd_in_progress) {
     case DPP:
