@@ -884,7 +884,8 @@ static uint64_t nuc970_sys_read(void* opaque, hwaddr offset,
         break;
     }
 
-    //fprintf(stderr, "sys_read(offset=%lx, value=%08x)\n", offset, r);
+    if (offset != 0x1fc)
+        fprintf(stderr, "sys_read (offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -892,7 +893,8 @@ static void nuc970_sys_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970SysState* s = (NUC970SysState*)opaque;
-    //fprintf(stderr, "sys_write(offset=%lx, value=%08x)\n", offset, value);
+    if (offset != 0x1fc)
+        fprintf(stderr, "sys_write(offset=%lx, value=%08x)\n", offset, value);
     switch (offset)
     {
     case 0x1fc:
@@ -929,6 +931,20 @@ static const TypeInfo nuc970_sys_info = {
 };
 
 // WDT
+/*
+[10:8] TOUTSEL WDT Time-out Interval Selection (Write Protect)
+These three bits select the time-out interval period for the WDT.
+TWDT = 12MHz/128 = 93750
+0 000 = 2^4 *TWDT.
+1 001 = 2^6 *TWDT.
+2 010 = 2^8 *TWDT.
+3 011 = 2^10 *TWDT.
+4 100 = 2^12 *TWDT.
+5 101 = 2^14 *TWDT.
+6 110 = 2^16 *TWDT.  0.7 sec
+7 111 = 2^18 *TWDT.
+Note: This bit is write protected. Refer to the REGWRPROT register.
+*/
 
 struct NUC970WdtState {
     SysBusDevice parent_obj;
@@ -960,7 +976,7 @@ static uint64_t nuc970_wdt_read(void* opaque, hwaddr offset,
         break;
     }
 
-    //fprintf(stderr, "wdt_read(offset=%lx, value=%08x)\n", offset, r);
+    //fprintf(stderr, "wdt_read (offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -972,7 +988,16 @@ static void nuc970_wdt_write(void* opaque, hwaddr offset,
     switch (offset)
     {
     case 0:
-        s->ctl = value;
+        if (value & BIT(0)) {
+            //fprintf(stderr, "Reset Watchdog counter...\n");
+        }
+        if (value & BIT(2)) {
+            value &= ~BIT(2);   // clear RSTF
+        }
+        if (value & BIT(3)) {
+            value &= ~BIT(3);   // clear WDTIF
+        }
+        s->ctl = value & ~(0x82);   // clear read only fields
         break;
     case 4:
         s->altctl = value;
@@ -1492,6 +1517,11 @@ static const TypeInfo nuc970_gpio_info = {
 #define MP_KEY_BTN_VOLUME      (1 << 6)
 #define MP_KEY_BTN_NAVIGATION  (1 << 7)
 
+/*
+ * Matrix keypad interface (maximum 4x8 array, and minimum 2x2 array).
+ * Generate interrupt and update all the keys (maximum 32 keys, minimum 4 keys) information
+ * (press/release) every time the user pressing or releasing.
+ */
 #define TYPE_NUC970_KEY "nuc970_key"
 OBJECT_DECLARE_SIMPLE_TYPE(nuc970_key_state, NUC970_KEY)
 
@@ -2209,7 +2239,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     NUC970FmiState* fmi = (NUC970FmiState*)opaque;
     uint8_t blkbuf[2048];
     int ryby = 0;
-    //fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
+    //fprintf(stderr, "fmi_write(offset=%lx, value=%08lx, size=%d)\n", offset, value, size);
     switch (offset)
     {
     case 0x400:
@@ -2274,7 +2304,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
             printf("********** Software Engine Reset...\n");
         }
         else if (value & (1 << 1)) { // DMA Read Data (1 page)
-            printf("********** DMA Read Data...\n");
+            printf("********** DMA Read Data %08x...\n", fmi->FMI_DMASA);
             uint8_t page[2048 + 64];
             for (int i = 0; i < (2048 + 64); i++)
             {
@@ -2375,7 +2405,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         fmi->FMI_NANDRA[(offset - 0xa00) / 4] = value;
         break;
     default:
-        fprintf(stderr, "fmi_write(offset=%lx, value=%08lx)\n", offset, value);
+        fprintf(stderr, "fmi_write(offset=%lx, value=%08lx, size=%d)\n", offset, value, size);
         break;
     }
 }
@@ -2414,12 +2444,23 @@ static void nuc970_fmi_init(Object* obj)
     }
 
     fmi->FMI_CTL = 0x0;
-    fmi->FMI_NANDTMCTL = 0x00010105;
+
     fmi->FMI_NANDCTL = 0x1E880090;
+    fmi->FMI_NANDTMCTL = 0x00010105;
+    fmi->FMI_NANDINTEN = 0x0;
     fmi->FMI_NANDINTSTS = 0x00040000;
     fmi->FMI_NANDCMD = 0x0;
     fmi->FMI_NANDADDR = 0x0;
     fmi->FMI_NANDECTL = 0x0;
+    fmi->FMI_NANDDATA = 0x0;      // 0x8b8
+    fmi->FMI_NANDRACTL = 0x0;     // 0x8bc
+    fmi->FMI_NANDECTL = 0x0;      // 0x8c0
+    memset(fmi->FMI_NANDECCES, 0, 4 * sizeof(uint32_t));  // 0x8d0~0x8dc
+    memset(fmi->FMI_NANDECCPROTA, 0, 2 * sizeof(uint32_t)); // 0x8e0~0x8e4
+    memset(fmi->FMI_NANDECCEA, 0, 12 * sizeof(uint32_t)); // 0x900~0x92c
+    for (int i = 0; i < 6; i++)
+        fmi->FMI_NANDECCED[i] = 0x80808080;  // 0x960~0x974
+    memset(fmi->FMI_NANDRA, 0, 118 * sizeof(uint32_t));   // 0xa00 + 04 * n(0,1,...117)
 
     fmi->FMI_EMMCCTL = 0x01010000;
     fmi->FMI_EMMCCMD = 0x0;
@@ -3259,8 +3300,11 @@ static void nuc970_init(MachineState* machine)
 
     //nuc970_eeprom_init(i2c, 0x50, 32 * KiB);
 
+#ifdef NUC970_LCD
     //lcd_dev = 
     sysbus_create_simple(TYPE_NUC970_LCD, LCM_BA, NULL);
+#endif
+
 #if 0
     key_dev = sysbus_create_simple(TYPE_NUC970_KEY, -1, NULL);
 
@@ -3297,20 +3341,7 @@ static void nuc970_init(MachineState* machine)
     sysbus_create_simple(TYPE_NUC970_SDIC, SDIC_BA, NULL);
     sysbus_create_simple(TYPE_NUC970_RTC, RTC_BA, NULL);
 
-//#define NUC970_TIMER2
 
-#ifdef NUC970_TIMER2
-    dev = qdev_new("nuc970-sys-timer");
-    SysBusDevice* sbd = SYS_BUS_DEVICE(dev);
-    sysbus_realize(sbd, &error_abort);
-    sysbus_mmio_map(sbd, 0, TMR0_BA);
-    int j;
-    for (j = 0; j < 5; j++) {
-        //qemu_irq irq = npcm7xx_irq(s, first_irq + j);
-        //sysbus_connect_irq(sbd, j, irq);
-        sysbus_connect_irq(sbd, j, qdev_get_gpio_in(aic, nuc970_tim_irq[j]));
-    }
-#else
     {
         //dev = qdev_new(TYPE_NPCM7XX_TIMER);
         for (i = 0; i < ARRAY_SIZE(tmr); i++) {
@@ -3346,7 +3377,6 @@ static void nuc970_init(MachineState* machine)
             sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(aic, nuc970_etmr_irq[i]));
         }
     }
-#endif
     
     /*** UARTs ***/
     //uart[0] = 
@@ -3423,7 +3453,12 @@ static void nuc970_init(MachineState* machine)
     sysbus_mmio_map(s, 0, SDH_BA);
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, SDH_IRQn));
 
-    
+#ifndef NUC970_LCD
+    create_unimplemented_device("nuc970.lcd", LCM_BA, 0x1000);
+#endif
+    create_unimplemented_device("nuc970.uart2", UART2_BA, 0x100);
+    create_unimplemented_device("nuc970.uart3", UART3_BA, 0x100);
+    create_unimplemented_device("nuc970.uart4", UART4_BA, 0x100);
     create_unimplemented_device("nuc970.gdma", GDMA_BA, 0x1000);
     create_unimplemented_device("nuc970.ebi", EBI_BA, 0x800);
     create_unimplemented_device("nuc970.emc1", EMC1_BA, 0x1000);

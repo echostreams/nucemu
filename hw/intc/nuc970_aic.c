@@ -73,7 +73,7 @@ static int nuc970_aic_get_irq(NUC970AicState* s) {
 /* Update interrupts.  */
 static void nuc970_aic_update(NUC970AicState* s)
 {
-    int i;
+    //int i;
     uint64_t new = s->raw_status & s->enabled;
     uint64_t flags;
 
