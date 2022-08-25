@@ -282,8 +282,8 @@ static uint32_t npcm7xx_timer_read_tdr(NPCM7xxTimer* t)
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
 
         uint32_t r = npcm7xx_timer_ns_to_count(t, t->base_timer.expires_ns - now);
-        //fprintf(stderr, "timer_read_tdr: %d, now: %ld, exp: %ld, %ld\n", r, now, 
-        //    t->base_timer.expires_ns, t->base_timer.expires_ns - now);
+        fprintf(stderr, "timer_read_tdr: %d, now: %ld, exp: %ld, %ld\n", r, now, 
+            t->base_timer.expires_ns, t->base_timer.expires_ns - now);
         r = (t->ticr & 0xffffff) - r;
         return r;
     }

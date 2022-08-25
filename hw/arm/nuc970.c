@@ -51,6 +51,7 @@
 #include "hw/loader.h"
 #include "hw/usb/hcd-ohci.h"
 #include "hw/usb/hcd-ehci.h"
+#include "qemu/log.h"
 
 #define MP_MISC_BASE            0x80002000
 #define MP_MISC_SIZE            0x00001000
@@ -150,6 +151,60 @@ void DumpHex(const void* data, size_t size) {
     }
 }
 
+/*
+ * 
+ * 
+ * 
+ */
+#define LCM_BASE                        0
+#define REG_LCM_DCCS                    (LCM_BASE  + 0x00)
+#define LCM_DCCS_ENG_RST                (1 << 0)
+
+#define REG_LCM_DEV_CTRL                (LCM_BASE  + 0x04)
+#define REG_LCM_MPU_CMD                 (LCM_BASE  + 0x08)
+#define REG_LCM_INT_CS                  (LCM_BASE  + 0x0c)
+#define REG_LCM_CRTC_SIZE               (LCM_BASE  + 0x10)
+#define LCM_CRTC_SIZE_VTTVAL(x)         ((x) << 16)
+#define LCM_CRTC_SIZE_HTTVAL(x)         ((x) << 0)
+#define REG_LCM_CRTC_DEND               (LCM_BASE  + 0x14)
+#define LCM_CRTC_DEND_VDENDVAL(x)       ((x) << 16)
+#define LCM_CRTC_DEND_HDENDVAL(x)       ((x) << 0)
+#define REG_LCM_CRTC_HR                 (LCM_BASE  + 0x18)
+#define LCM_CRTC_HR_EVAL(x)             ((x) << 16)
+#define LCM_CRTC_HR_SVAL(x)             ((x) << 0)
+#define REG_LCM_CRTC_HSYNC              (LCM_BASE  + 0x1C)
+#define LCM_CRTC_HSYNC_SHIFTVAL(x)      ((x) << 30)
+#define LCM_CRTC_HSYNC_EVAL(x)          ((x) << 16)
+#define LCM_CRTC_HSYNC_SVAL(x)          ((x) << 0)
+#define REG_LCM_CRTC_VR                 (LCM_BASE  + 0x20)
+#define LCM_CRTC_VR_EVAL(x)             ((x) << 16)
+#define LCM_CRTC_VR_SVAL(x)             ((x) << 0)
+#define REG_LCM_VA_BADDR0               (LCM_BASE  + 0x24)
+#define REG_LCM_VA_BADDR1               (LCM_BASE  + 0x28)
+#define REG_LCM_VA_FBCTRL               (LCM_BASE  + 0x2C)
+#define REG_LCM_VA_SCALE                (LCM_BASE  + 0x30)
+#define REG_LCM_VA_WIN                  (LCM_BASE  + 0x38)
+#define REG_LCM_VA_STUFF                (LCM_BASE  + 0x3C)
+#define REG_LCM_OSD_WINS                (LCM_BASE  + 0x40)
+#define REG_LCM_OSD_WINE                (LCM_BASE  + 0x44)
+#define REG_LCM_OSD_BADDR               (LCM_BASE  + 0x48)
+#define REG_LCM_OSD_FBCTRL              (LCM_BASE  + 0x4c)
+#define REG_LCM_OSD_OVERLAY             (LCM_BASE  + 0x50)
+#define REG_LCM_OSD_CKEY                (LCM_BASE  + 0x54)
+#define REG_LCM_OSD_CMASK               (LCM_BASE  + 0x58)
+#define REG_LCM_OSD_SKIP1               (LCM_BASE  + 0x5C)
+#define REG_LCM_OSD_SKIP2               (LCM_BASE  + 0x60)
+#define REG_LCM_OSD_SCALE               (LCM_BASE  + 0x64)
+#define REG_LCM_MPU_VSYNC               (LCM_BASE  + 0x68)
+#define REG_LCM_HC_CTRL                 (LCM_BASE  + 0x6C)
+#define REG_LCM_HC_POS                  (LCM_BASE  + 0x70)
+#define REG_LCM_HC_WBCTRL               (LCM_BASE  + 0x74)
+#define REG_LCM_HC_BADDR                (LCM_BASE  + 0x78)
+#define REG_LCM_HC_COLOR0               (LCM_BASE  + 0x7C)
+#define REG_LCM_HC_COLOR1               (LCM_BASE  + 0x80)
+#define REG_LCM_HC_COLOR2               (LCM_BASE  + 0x84)
+#define REG_LCM_HC_COLOR3               (LCM_BASE  + 0x88)
+
 #define TYPE_NUC970_LCD "nuc970_lcd"
 OBJECT_DECLARE_SIMPLE_TYPE(nuc970_lcd_state, NUC970_LCD)
 
@@ -167,7 +222,8 @@ struct nuc970_lcd_state {
     QemuConsole* con;
     //uint8_t video_ram[128 * 64 / 8];
     uint8_t video_ram[800 * 480 * 2];
-
+    uint8_t osd_ram[320 * 240 * 2];
+    uint32_t devctrl;
     uint32_t crtc_size; // CRTC_SIZE
     uint32_t crtc_dend; // CRTC_DEND
 
@@ -175,7 +231,7 @@ struct nuc970_lcd_state {
     uint32_t va_baddr1; // VA_BADDR1
     uint32_t osd_wins;  // starting coordinates register
     uint32_t osd_wine;  // ending coordinates register
-
+    uint32_t osd_baddr; // 
 };
 /*
 static uint8_t scale_lcd_color(nuc970_lcd_state* s, uint8_t col)
@@ -210,18 +266,24 @@ static void lcd_refresh(void* opaque)
 {
     int x, y;
     //int col;
-
+    int osd_wxs, osd_wys, osd_wxe, osd_wye;
     nuc970_lcd_state* s = opaque;    
     DisplaySurface* surface = qemu_console_surface(s->con);
     uint8_t* data_display;
-    data_display = surface_data(surface);
+    uint8_t* osd_display;
+    
 
     //col = rgb_to_pixel32(scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 16) & 0xff),
     //    scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 8) & 0xff),
     //    scale_lcd_color(s, MP_LCD_TEXTCOLOR & 0xff));
 
-    dma_memory_read(&address_space_memory, s->va_baddr0, s->video_ram, sizeof(s->video_ram), MEMTXATTRS_UNSPECIFIED);
-
+    if (dma_memory_read(&address_space_memory, s->va_baddr0, s->video_ram, 
+        sizeof(s->video_ram), MEMTXATTRS_UNSPECIFIED)) {
+    
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Failed to read LCD VA descriptor @ 0x%"
+            HWADDR_PRIx "\n", __func__, s->va_baddr0);        
+    }
+    data_display = surface_data(surface);
     for (y = 0; y < 480; y++) {
         for (x = 0; x < 800; x++, data_display += 4) {
             uint16_t color = 
@@ -235,6 +297,33 @@ static void lcd_refresh(void* opaque)
             uint32_t dest_color = rgb_to_pixel32(r, g, b);
             *(uint32_t*)data_display = dest_color;
 
+        }
+    }
+    osd_wxs = s->osd_wins & 0x7ff;
+    osd_wys = (s->osd_wins >> 16) & 0x7ff;
+    osd_wxe = s->osd_wine & 0x7ff;
+    osd_wye = (s->osd_wine >> 16) & 0x7ff;
+    if (dma_memory_read(&address_space_memory, s->osd_baddr, s->osd_ram,
+        sizeof(s->osd_ram), MEMTXATTRS_UNSPECIFIED)) {
+
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Failed to read LCD OSD descriptor @ 0x%"
+            HWADDR_PRIx "\n", __func__, s->osd_baddr);
+    }
+
+    osd_display = surface_data(surface) + osd_wys * 800 * 4 + osd_wxs * 4;
+    for (y = 0; y < 240; y++, osd_display += (800 - osd_wxe + osd_wxs - 1) * 4) {
+        for (x = 0; x < 320; x++, osd_display += 4) {
+            uint16_t color =
+                s->osd_ram[y * 320 * 2 + x * 2] |
+                s->osd_ram[y * 320 * 2 + x * 2 + 1] << 8;
+
+            uint8_t r = ((color >> 11) & 0x1F);
+            uint8_t g = ((color >> 5) & 0x3F);
+            uint8_t b = (color & 0x1F);
+
+            uint32_t dest_color = rgb_to_pixel32(r, g, b);            
+
+            *(uint32_t*)osd_display = dest_color;
         }
     }
 
@@ -256,23 +345,30 @@ static uint64_t nuc970_lcd_read(void* opaque, hwaddr offset,
     unsigned size)
 {
     nuc970_lcd_state* s = opaque;
-
+    uint32_t r = 0;
     switch (offset) {
     case MP_LCD_IRQCTRL:
-        return s->irqctrl;
-
+        r = s->irqctrl;
+        break;
     default:
-        return 0;
+        r = 0;
+        break;
     }
+
+    printf("lcd_read:  %08lx/%d %x\n", offset, size, r);
+    return r;
 }
 
 static void nuc970_lcd_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     nuc970_lcd_state* s = opaque;
-    fprintf(stderr, "lcd_write: %08lx %lx\n", offset, value);
+    printf("lcd_write: %08lx/%d %lx\n", offset, size, value);
 
     switch (offset) {
+    case REG_LCM_DEV_CTRL:
+        s->devctrl = value;
+        break;
     case 0x10:
         s->crtc_size = value;
         break;
@@ -290,11 +386,15 @@ static void nuc970_lcd_write(void* opaque, hwaddr offset,
         break;
     case 0x40:
         s->osd_wins = value;
+        printf("    osd wxs %d, wys %d\n", value & 0x7ff, (value >> 16) & 0x7ff);
         break;
     case 0x44:
         s->osd_wine = value;
+        printf("    osd wxe %d, wye %d\n", value & 0x7ff, (value >> 16) & 0x7ff);
         break;
-        
+    case 0x48:
+        s->osd_baddr = value;
+        break;
 
     case MP_LCD_IRQCTRL:
         s->irqctrl = value;
@@ -362,7 +462,7 @@ static void nuc970_lcd_init(Object* obj)
         "nuc970-lcd", 0x1000);
     sysbus_init_mmio(sbd, &s->iomem);
 
-    qdev_init_gpio_in(dev, nuc970_lcd_gpio_brightness_in, 3);
+    //qdev_init_gpio_in(dev, nuc970_lcd_gpio_brightness_in, 3);
 }
 
 static const VMStateDescription nuc970_lcd_vmsd = {
@@ -894,7 +994,7 @@ static void nuc970_sys_write(void* opaque, hwaddr offset,
 {
     NUC970SysState* s = (NUC970SysState*)opaque;
     if (offset != 0x1fc)
-        fprintf(stderr, "sys_write(offset=%lx, value=%08x)\n", offset, value);
+        fprintf(stderr, "sys_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
     case 0x1fc:
@@ -967,7 +1067,7 @@ static uint64_t nuc970_wdt_read(void* opaque, hwaddr offset,
     uint32_t r = 0;
     switch (offset) {
     case 0:
-        r = s->ctl & ~(0x01);   // clear RSTCNT
+        r = s->ctl;// &~(0x01);   // clear RSTCNT
         break;
     case 4:
         r = s->altctl;
@@ -988,6 +1088,9 @@ static void nuc970_wdt_write(void* opaque, hwaddr offset,
     switch (offset)
     {
     case 0:
+        
+        s->ctl = value;
+
         if (value & BIT(0)) {
             //fprintf(stderr, "Reset Watchdog counter...\n");
         }
@@ -997,7 +1100,7 @@ static void nuc970_wdt_write(void* opaque, hwaddr offset,
         if (value & BIT(3)) {
             value &= ~BIT(3);   // clear WDTIF
         }
-        s->ctl = value & ~(0x82);   // clear read only fields
+        //s->ctl = value & ~(0x82);   // clear read only fields
         break;
     case 4:
         s->altctl = value;
@@ -1121,15 +1224,20 @@ static uint64_t nuc970_clk_read(void* opaque, hwaddr offset,
     unsigned size)
 {
     NUC970ClkState* s = (NUC970ClkState*)opaque;
+    uint32_t r;
     switch (offset) {
     case CLK_PMCON:
-        return s->pmcon;
+        r = s->pmcon;
+        break;
     case CLK_HCLKEN:
-        return s->hclk;
+        r = s->hclk;
+        break;
     case CLK_PCLKEN0:
-        return s->pclk0;
+        r = s->pclk0;
+        break;
     case CLK_PCLKEN1:
-        return s->pclk1;
+        r = s->pclk1;
+        break;
     case CLK_DIVCTL0:
     case CLK_DIVCTL1:
     case CLK_DIVCTL2:
@@ -1140,21 +1248,46 @@ static uint64_t nuc970_clk_read(void* opaque, hwaddr offset,
     case CLK_DIVCTL7:
     case CLK_DIVCTL8:
     case CLK_DIVCTL9:
-        return s->divctl[(offset - CLK_DIVCTL0) / 4];
+        r = s->divctl[(offset - CLK_DIVCTL0) / 4];
+        break;
     case CLK_APLLCON:
-        return s->apll;
+        r = s->apll;
+        break;
     case CLK_UPLLCON:
-        return s->upll;
+        r = s->upll;
+        break;
     case CLK_PLLSTBCNTR:
-        return s->pll;
+        r = s->pll;
+        break;
     default:
-        return 0;
+        r = 0;
+        break;
     }
+
+    fprintf(stderr, "clk_r @0x%" HWADDR_PRIx ": 0x%" PRIx32 "\n",
+        offset, r);
+    return r;
 }
 
 static void nuc970_clk_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
+    uint32_t val = value;
+    NUC970ClkState* s = (NUC970ClkState*)opaque;
+    fprintf(stderr, "clk_w @0x%" HWADDR_PRIx ": 0x%" PRIx32 "\n",
+        offset, val);
+    switch (offset)
+    {
+    case CLK_HCLKEN:
+        s->hclk = val;
+        break;
+    case CLK_PCLKEN0:
+        s->pclk0 = val;
+        break;
+    case CLK_PCLKEN1:
+        s->pclk1 = val;
+        break;
+    }    
 }
 
 static const MemoryRegionOps nuc970_clk_ops = {
@@ -1663,10 +1796,7 @@ static const TypeInfo nuc970_key_info = {
 struct NUC970RtcState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
-    /*
-    WDT_CTL WDT_BA + 0x00 R / W WDT Control Register 0x0000_0700
-    WDT_ALTCTL WDT_BA + 0x04 R / W WDT Alternative Control Register 0x0000_0000
-    */
+    
     uint32_t time;     // 0c
     uint32_t cal;   // 10
     uint32_t timefmt; // 14
@@ -3157,6 +3287,7 @@ static const int nuc970_etmr_irq[] = {
 };
 
 #define INIT_SHADOW_REGION 1
+#define CONFIG_NUC970_LCD
 
 /*
 static void nuc970_eeprom_init(I2CBus* bus, uint8_t addr, uint32_t rsize)
@@ -3300,7 +3431,7 @@ static void nuc970_init(MachineState* machine)
 
     //nuc970_eeprom_init(i2c, 0x50, 32 * KiB);
 
-#ifdef NUC970_LCD
+#ifdef CONFIG_NUC970_LCD
     //lcd_dev = 
     sysbus_create_simple(TYPE_NUC970_LCD, LCM_BA, NULL);
 #endif
@@ -3386,6 +3517,7 @@ static void nuc970_init(MachineState* machine)
     nuc970_uart_create(UART1_BA, 64, 1, serial_hd(1),
         qdev_get_gpio_in(aic, UART1_IRQn));
 
+    nuc970_uart_create(UART4_BA, 64, 4, serial_hd(4), qdev_get_gpio_in(aic, UART4_IRQn));
     nuc970_uart_create(UART5_BA, 64, 5, serial_hd(5), qdev_get_gpio_in(aic, UART5_IRQn));
     nuc970_uart_create(UART6_BA, 64, 6, serial_hd(6), qdev_get_gpio_in(aic, UART6_IRQn));
     nuc970_uart_create(UART7_BA, 64, 7, serial_hd(7), qdev_get_gpio_in(aic, UART7_IRQn));
@@ -3453,12 +3585,12 @@ static void nuc970_init(MachineState* machine)
     sysbus_mmio_map(s, 0, SDH_BA);
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, SDH_IRQn));
 
-#ifndef NUC970_LCD
+#ifndef CONFIG_NUC970_LCD
     create_unimplemented_device("nuc970.lcd", LCM_BA, 0x1000);
 #endif
     create_unimplemented_device("nuc970.uart2", UART2_BA, 0x100);
     create_unimplemented_device("nuc970.uart3", UART3_BA, 0x100);
-    create_unimplemented_device("nuc970.uart4", UART4_BA, 0x100);
+    //create_unimplemented_device("nuc970.uart4", UART4_BA, 0x100);
     create_unimplemented_device("nuc970.gdma", GDMA_BA, 0x1000);
     create_unimplemented_device("nuc970.ebi", EBI_BA, 0x800);
     create_unimplemented_device("nuc970.emc1", EMC1_BA, 0x1000);
