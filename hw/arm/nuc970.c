@@ -156,6 +156,7 @@ void DumpHex(const void* data, size_t size) {
  * 
  * 
  */
+/*
 #define LCM_BASE                        0
 #define REG_LCM_DCCS                    (LCM_BASE  + 0x00)
 #define LCM_DCCS_ENG_RST                (1 << 0)
@@ -204,6 +205,7 @@ void DumpHex(const void* data, size_t size) {
 #define REG_LCM_HC_COLOR1               (LCM_BASE  + 0x80)
 #define REG_LCM_HC_COLOR2               (LCM_BASE  + 0x84)
 #define REG_LCM_HC_COLOR3               (LCM_BASE  + 0x88)
+*/
 
 #define TYPE_NUC970_LCD "nuc970_lcd"
 OBJECT_DECLARE_SIMPLE_TYPE(nuc970_lcd_state, NUC970_LCD)
@@ -223,6 +225,8 @@ struct nuc970_lcd_state {
     //uint8_t video_ram[128 * 64 / 8];
     uint8_t video_ram[800 * 480 * 2];
     uint8_t osd_ram[320 * 240 * 2];
+
+    uint32_t dccs;      // 
     uint32_t devctrl;
     uint32_t crtc_size; // CRTC_SIZE
     uint32_t crtc_dend; // CRTC_DEND
@@ -276,57 +280,59 @@ static void lcd_refresh(void* opaque)
     //col = rgb_to_pixel32(scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 16) & 0xff),
     //    scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 8) & 0xff),
     //    scale_lcd_color(s, MP_LCD_TEXTCOLOR & 0xff));
+    if (s->dccs & (1 << 1)) {   // VA_EN
+        if (dma_memory_read(&address_space_memory, s->va_baddr0, s->video_ram,
+            sizeof(s->video_ram), MEMTXATTRS_UNSPECIFIED)) {
 
-    if (dma_memory_read(&address_space_memory, s->va_baddr0, s->video_ram, 
-        sizeof(s->video_ram), MEMTXATTRS_UNSPECIFIED)) {
-    
-        qemu_log_mask(LOG_GUEST_ERROR, "%s: Failed to read LCD VA descriptor @ 0x%"
-            HWADDR_PRIx "\n", __func__, s->va_baddr0);        
-    }
-    data_display = surface_data(surface);
-    for (y = 0; y < 480; y++) {
-        for (x = 0; x < 800; x++, data_display += 4) {
-            uint16_t color = 
-                s->video_ram[y * 800 * 2 + x * 2] | 
-                s->video_ram[y * 800 * 2 + x * 2 + 1] << 8;
-        
-            uint8_t r = ((color >> 11) & 0x1F);
-            uint8_t g = ((color >> 5) & 0x3F);
-            uint8_t b = (color & 0x1F);
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: Failed to read LCD VA descriptor @ 0x%08x\n",
+                __func__, s->va_baddr0);
+        }
+        data_display = surface_data(surface);
+        for (y = 0; y < 480; y++) {
+            for (x = 0; x < 800; x++, data_display += 4) {
+                uint16_t color =
+                    s->video_ram[y * 800 * 2 + x * 2] |
+                    s->video_ram[y * 800 * 2 + x * 2 + 1] << 8;
 
-            uint32_t dest_color = rgb_to_pixel32(r, g, b);
-            *(uint32_t*)data_display = dest_color;
+                uint8_t r = ((color >> 11) & 0x1F);
+                uint8_t g = ((color >> 5) & 0x3F);
+                uint8_t b = (color & 0x1F);
 
+                uint32_t dest_color = rgb_to_pixel32(r, g, b);
+                *(uint32_t*)data_display = dest_color;
+
+            }
         }
     }
-    osd_wxs = s->osd_wins & 0x7ff;
-    osd_wys = (s->osd_wins >> 16) & 0x7ff;
-    osd_wxe = s->osd_wine & 0x7ff;
-    osd_wye = (s->osd_wine >> 16) & 0x7ff;
-    if (dma_memory_read(&address_space_memory, s->osd_baddr, s->osd_ram,
-        sizeof(s->osd_ram), MEMTXATTRS_UNSPECIFIED)) {
+    if (s->dccs & (1 << 2)) {   // OSD_EN
+        osd_wxs = s->osd_wins & 0x7ff;
+        osd_wys = (s->osd_wins >> 16) & 0x7ff;
+        osd_wxe = s->osd_wine & 0x7ff;
+        osd_wye = (s->osd_wine >> 16) & 0x7ff;
+        if (dma_memory_read(&address_space_memory, s->osd_baddr, s->osd_ram,
+            sizeof(s->osd_ram), MEMTXATTRS_UNSPECIFIED)) {
 
-        qemu_log_mask(LOG_GUEST_ERROR, "%s: Failed to read LCD OSD descriptor @ 0x%"
-            HWADDR_PRIx "\n", __func__, s->osd_baddr);
-    }
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: Failed to read LCD OSD descriptor @ 0x%08x\n",
+                __func__, s->osd_baddr);
+        }
 
-    osd_display = surface_data(surface) + osd_wys * 800 * 4 + osd_wxs * 4;
-    for (y = 0; y < 240; y++, osd_display += (800 - osd_wxe + osd_wxs - 1) * 4) {
-        for (x = 0; x < 320; x++, osd_display += 4) {
-            uint16_t color =
-                s->osd_ram[y * 320 * 2 + x * 2] |
-                s->osd_ram[y * 320 * 2 + x * 2 + 1] << 8;
+        osd_display = surface_data(surface) + osd_wys * 800 * 4 + osd_wxs * 4;
+        for (y = 0; y < 240; y++, osd_display += (800 - osd_wxe + osd_wxs - 1) * 4) {
+            for (x = 0; x < 320; x++, osd_display += 4) {
+                uint16_t color =
+                    s->osd_ram[y * 320 * 2 + x * 2] |
+                    s->osd_ram[y * 320 * 2 + x * 2 + 1] << 8;
 
-            uint8_t r = ((color >> 11) & 0x1F);
-            uint8_t g = ((color >> 5) & 0x3F);
-            uint8_t b = (color & 0x1F);
+                uint8_t r = ((color >> 11) & 0x1F);
+                uint8_t g = ((color >> 5) & 0x3F);
+                uint8_t b = (color & 0x1F);
 
-            uint32_t dest_color = rgb_to_pixel32(r, g, b);            
+                uint32_t dest_color = rgb_to_pixel32(r, g, b);
 
-            *(uint32_t*)osd_display = dest_color;
+                *(uint32_t*)osd_display = dest_color;
+            }
         }
     }
-
     dpy_gfx_update(s->con, 0, 0, 800, 480);
 }
 
@@ -347,6 +353,9 @@ static uint64_t nuc970_lcd_read(void* opaque, hwaddr offset,
     nuc970_lcd_state* s = opaque;
     uint32_t r = 0;
     switch (offset) {
+    case 0x00:
+        r = s->dccs;
+        break;
     case MP_LCD_IRQCTRL:
         r = s->irqctrl;
         break;
@@ -366,7 +375,10 @@ static void nuc970_lcd_write(void* opaque, hwaddr offset,
     printf("lcd_write: %08lx/%d %lx\n", offset, size, value);
 
     switch (offset) {
-    case REG_LCM_DEV_CTRL:
+    case 0x00:
+        s->dccs = value;
+        break;
+    case 0x04:
         s->devctrl = value;
         break;
     case 0x10:
@@ -386,11 +398,11 @@ static void nuc970_lcd_write(void* opaque, hwaddr offset,
         break;
     case 0x40:
         s->osd_wins = value;
-        printf("    osd wxs %d, wys %d\n", value & 0x7ff, (value >> 16) & 0x7ff);
+        printf("    osd wxs %ld, wys %ld\n", value & 0x7ff, (value >> 16) & 0x7ff);
         break;
     case 0x44:
         s->osd_wine = value;
-        printf("    osd wxe %d, wye %d\n", value & 0x7ff, (value >> 16) & 0x7ff);
+        printf("    osd wxe %ld, wye %ld\n", value & 0x7ff, (value >> 16) & 0x7ff);
         break;
     case 0x48:
         s->osd_baddr = value;
@@ -1264,8 +1276,8 @@ static uint64_t nuc970_clk_read(void* opaque, hwaddr offset,
         break;
     }
 
-    fprintf(stderr, "clk_r @0x%" HWADDR_PRIx ": 0x%" PRIx32 "\n",
-        offset, r);
+    //fprintf(stderr, "clk_r @0x%" HWADDR_PRIx ": 0x%" PRIx32 "\n",
+    //    offset, r);
     return r;
 }
 
@@ -1274,8 +1286,8 @@ static void nuc970_clk_write(void* opaque, hwaddr offset,
 {
     uint32_t val = value;
     NUC970ClkState* s = (NUC970ClkState*)opaque;
-    fprintf(stderr, "clk_w @0x%" HWADDR_PRIx ": 0x%" PRIx32 "\n",
-        offset, val);
+    //fprintf(stderr, "clk_w @0x%" HWADDR_PRIx ": 0x%" PRIx32 "\n",
+    //    offset, val);
     switch (offset)
     {
     case CLK_HCLKEN:
@@ -2352,6 +2364,7 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
     case 0x8c0: r = fmi->FMI_NANDECTL; break;
     case 0xa00 ... 0xbd4:
         r = fmi->FMI_NANDRA[(offset - 0xa00) / 4];
+        //fprintf(stderr, "read ra  (offset=%lx, value=%08x)\n", offset, r);
         break;
     default: 
         r = 0; 
@@ -2434,40 +2447,52 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
             printf("********** Software Engine Reset...\n");
         }
         else if (value & (1 << 1)) { // DMA Read Data (1 page)
-            printf("********** DMA Read Data %08x...\n", fmi->FMI_DMASA);
-            uint8_t page[2048 + 64];
-            for (int i = 0; i < (2048 + 64); i++)
+            uint32_t oobSize = fmi->FMI_NANDRACTL & 0xff;
+            uint32_t pageSize = fmiPageSize(fmi);
+            printf("********** DMA Read Page for %08x, size: %d, oob: %d\n",
+                fmi->FMI_DMASA, pageSize, oobSize);            
+            uint8_t *page = g_malloc(pageSize + oobSize);
+            for (int i = 0; i < (pageSize + oobSize); i++)
             {
                 //page[i] = ecc_digest(&fmi->ecc, nand_getio(fmi->nand));
                 page[i] = nand_getio(fmi->nand);
             }
             dma_memory_write(&address_space_memory, fmi->FMI_DMASA, page,
-                sizeof(page), MEMTXATTRS_UNSPECIFIED);
+                pageSize, MEMTXATTRS_UNSPECIFIED);
             
             //DumpHex(page, sizeof(page));
-
+            memcpy(fmi->FMI_NANDRA, &page[pageSize], oobSize);
+            
             fmi->FMI_NANDINTSTS |= (1 << 0);    // DMA_IF
+            if (page)
+                g_free(page);
         }
         else if (value & (1 << 2)) { // DMA Write Data (1 page)
             printf("********** DMA Write Data...\n");
-            uint8_t page[2048];
-            dma_memory_read(&address_space_memory, fmi->FMI_DMASA, page, sizeof(page), MEMTXATTRS_UNSPECIFIED);
+            uint32_t oobSize = fmi->FMI_NANDRACTL & 0xff;
+            uint32_t pageSize = fmiPageSize(fmi);
+            uint8_t *page = g_malloc(pageSize);
+            dma_memory_read(&address_space_memory, fmi->FMI_DMASA, page, pageSize, MEMTXATTRS_UNSPECIFIED);
             
             nand_setpins(fmi->nand, 0, 0, 0, fmi->FMI_NANDECTL & 0x01, 0);
-            for (int i = 0; i < (2048); i++)
+            for (int i = 0; i < pageSize; i++)
             {
                 nand_setio(fmi->nand, page[i]);
             }
             
             //DumpHex(page, sizeof(page));
-            for (int i = 0; i < 16; i++) {
-                printf(" %08x", fmi->FMI_NANDRA[i]);
-                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  0) & 0xff);
-                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  8) & 0xff);
-                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 16) & 0xff);
-                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 24) & 0xff);
+            for (int i = 0; i < oobSize / 4; i++) {
+                //printf(" %08x", fmi->FMI_NANDRA[i]);
+                //nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  0) & 0xff);
+                //nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  8) & 0xff);
+                //nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 16) & 0xff);
+                //nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 24) & 0xff);
+                nand_setio(fmi->nand, 0xff);
+                nand_setio(fmi->nand, 0xff);
+                nand_setio(fmi->nand, 0xff);
+                nand_setio(fmi->nand, 0xff);
             }
-
+            
             fmi->FMI_NANDINTSTS |= (1 << 0);
 
         }
@@ -3288,6 +3313,8 @@ static const int nuc970_etmr_irq[] = {
 
 #define INIT_SHADOW_REGION 1
 #define CONFIG_NUC970_LCD
+//CONFIG_NUC970_MMC
+//CONFIG_NAND_NUC970
 
 /*
 static void nuc970_eeprom_init(I2CBus* bus, uint8_t addr, uint32_t rsize)
@@ -3538,13 +3565,13 @@ static void nuc970_init(MachineState* machine)
     sysbus_create_simple(TYPE_NUC970_WDT, WDT_BA, NULL);
     sysbus_create_simple("nuc970.rng", CRPT_BA, NULL);
     //sysbus_create_simple(TYPE_NUC970_FMI, FMI_BA, NULL);
+    
     dev = qdev_new(TYPE_NUC970_FMI);
     s = SYS_BUS_DEVICE(dev);
     sysbus_realize(s, &error_abort);
     sysbus_mmio_map(s, 0, FMI_BA);
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, FMI_IRQn));
-
-
+    
     dev = qdev_new(TYPE_NPCM7XX_EMC);
     s = SYS_BUS_DEVICE(dev);
     if (nd_table[0].used) {
@@ -3588,6 +3615,10 @@ static void nuc970_init(MachineState* machine)
 #ifndef CONFIG_NUC970_LCD
     create_unimplemented_device("nuc970.lcd", LCM_BA, 0x1000);
 #endif
+
+    //0xB000_D000 – 0xB000_DFFF
+    //create_unimplemented_device("nuc970.fmi", FMI_BA, 0x1000);
+
     create_unimplemented_device("nuc970.uart2", UART2_BA, 0x100);
     create_unimplemented_device("nuc970.uart3", UART3_BA, 0x100);
     //create_unimplemented_device("nuc970.uart4", UART4_BA, 0x100);
