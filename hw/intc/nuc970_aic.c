@@ -123,8 +123,8 @@ static void nuc970_aic_update(NUC970AicState* s)
             s->vector = irq;
             s->oisr |= 1 << 1;
             //DPRINTF("set IRQ %d\n", irq);
-            if (irq != 16 && irq != 36)
-                fprintf(stderr, "set IRQ %d\n", irq);
+            //if (irq != 16 && irq != 36)
+            //    fprintf(stderr, "set IRQ %d\n", irq);
             qemu_set_irq(s->irq, 1);
         }
         else {

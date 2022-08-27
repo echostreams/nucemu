@@ -147,7 +147,7 @@ static const NUC970UartReg nuc970_uart_regs[] = {
 	{"UA_IER",   UCON,     0x00000000},
 	{"UA_FCR",   UFCON,    0x00000000},
 	{"UA_LCR",   UMCON,    0x00000000},
-	{"UA_MCR",   UTRSTAT,  0x0000d200},
+	{"UA_MCR",   UTRSTAT,  0x0000f200},
 	{"UA_MSR",   UERSTAT,  0x000001f0},
 	{"UA_FSR",   UFSTAT,   0x10404000}, /* 18: FIFO Status Register */
 	{"UA_ISR",   UMSTAT,   0x00000002}, /* RO */

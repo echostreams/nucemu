@@ -294,9 +294,13 @@ static void lcd_refresh(void* opaque)
                     s->video_ram[y * 800 * 2 + x * 2] |
                     s->video_ram[y * 800 * 2 + x * 2 + 1] << 8;
 
-                uint8_t r = ((color >> 11) & 0x1F);
-                uint8_t g = ((color >> 5) & 0x3F);
-                uint8_t b = (color & 0x1F);
+                //uint8_t r = ((color >> 11) & 0x1F);
+                //uint8_t g = ((color >> 5) & 0x3F);
+                //uint8_t b = (color & 0x1F);
+
+                uint8_t r = (color >> 8) & 0xf8;
+                uint8_t g = (color >> 3) & 0xfc;
+                uint8_t b = (color << 3) & 0xf8;
 
                 uint32_t dest_color = rgb_to_pixel32(r, g, b);
                 *(uint32_t*)data_display = dest_color;
@@ -323,9 +327,13 @@ static void lcd_refresh(void* opaque)
                     s->osd_ram[y * 320 * 2 + x * 2] |
                     s->osd_ram[y * 320 * 2 + x * 2 + 1] << 8;
 
-                uint8_t r = ((color >> 11) & 0x1F);
-                uint8_t g = ((color >> 5) & 0x3F);
-                uint8_t b = (color & 0x1F);
+                //uint8_t r = ((color >> 11) & 0x1F);
+                //uint8_t g = ((color >> 5) & 0x3F);
+                //uint8_t b = (color & 0x1F);
+
+                uint8_t r = (color >> 8) & 0xf8;
+                uint8_t g = (color >> 3) & 0xfc;
+                uint8_t b = (color << 3) & 0xf8;
 
                 uint32_t dest_color = rgb_to_pixel32(r, g, b);
 
@@ -2345,7 +2353,7 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
             if (ryby)
                 r = fmi->FMI_NANDINTSTS | READYBUSY;
             else
-                r = fmi->FMI_NANDINTSTS;
+                r = fmi->FMI_NANDINTSTS & ~(READYBUSY);
         }
         //fprintf(stderr, "FMI_NANDINTSTS: %08x\n", r);
         break;
@@ -2442,11 +2450,13 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     case 0x838:
         fmi->FMI_EMMCBLEN = value;
         break;
+
     case 0x8a0:
-        if (value & (1 << 0)) {  // Software Engine Reset
+        if (value & (1 << 0)) {  // SW_RST Software Engine Reset
             printf("********** Software Engine Reset...\n");
+
         }
-        else if (value & (1 << 1)) { // DMA Read Data (1 page)
+        else if (value & (1 << 1)) { // DRD_EN DMA Read Data (1 page)
             uint32_t oobSize = fmi->FMI_NANDRACTL & 0xff;
             uint32_t pageSize = fmiPageSize(fmi);
             printf("********** DMA Read Page for %08x, size: %d, oob: %d\n",
@@ -2460,14 +2470,14 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
             dma_memory_write(&address_space_memory, fmi->FMI_DMASA, page,
                 pageSize, MEMTXATTRS_UNSPECIFIED);
             
-            //DumpHex(page, sizeof(page));
+            //DumpHex(page, pageSize + oobSize);
             memcpy(fmi->FMI_NANDRA, &page[pageSize], oobSize);
             
             fmi->FMI_NANDINTSTS |= (1 << 0);    // DMA_IF
             if (page)
                 g_free(page);
         }
-        else if (value & (1 << 2)) { // DMA Write Data (1 page)
+        else if (value & (1 << 2)) { // DWR_EN DMA Write Data (1 page)
             printf("********** DMA Write Data...\n");
             uint32_t oobSize = fmi->FMI_NANDRACTL & 0xff;
             uint32_t pageSize = fmiPageSize(fmi);
@@ -2480,7 +2490,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
                 nand_setio(fmi->nand, page[i]);
             }
             
-            //DumpHex(page, sizeof(page));
+            DumpHex(page, pageSize);
             for (int i = 0; i < oobSize / 4; i++) {
                 //printf(" %08x", fmi->FMI_NANDRA[i]);
                 //nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  0) & 0xff);
@@ -2494,12 +2504,11 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
             }
             
             fmi->FMI_NANDINTSTS |= (1 << 0);
-
         }
-        else if (value & (1 << 3)) { // Redundant Area Read Enable
+        else if (value & (1 << 3)) { // REDUN_REN: Redundant Area Read Enable
             printf("********** Redundant Area Read...\n");
         }
-        fmi->FMI_NANDCTL = value & ~(0x3f); // remove [5:0] bit        
+        fmi->FMI_NANDCTL = value & ~(0x1f); // remove [3:0] bit        
         break;
     case 0x8a4:
         fmi->FMI_NANDTMCTL = value;
@@ -2522,13 +2531,17 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         nand_setpins(fmi->nand, 1/*cle*/, 0/*ale*/, 0/*ce*/, fmi->FMI_NANDECTL & 0x01/*wp*/, 0);   /* CLE */
         nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
         nand_getpins(fmi->nand, &ryby);
-        if (ryby)
+        if (ryby) {
             fmi->FMI_NANDINTSTS |= READYBUSY;
-        else
+            fmi->FMI_NANDINTSTS |= (1 << 10);   // RB0_IF
+        }
+        else {
             fmi->FMI_NANDINTSTS &= ~READYBUSY;
+            fmi->FMI_NANDINTSTS &= ~(1 << 10);  // RB0_IF
+        }
         break;
     case 0x8b4:
-        //fprintf(stderr, "FMI_NANDADDR(offset=%lx, value=%08lx)\n", offset, value);
+        //fprintf(stderr, "FMI_NANDADDR(offset=%lx, value=%08lx, size=%d)\n", offset, value, size);
         fmi->FMI_NANDADDR = value;
         nand_setpins(fmi->nand, 0, /*value & ENDADDR ? 1 : 0*/1, 0, fmi->FMI_NANDECTL & 0x01, 0); /* ENDADDR -> ALE */        
         nand_setio(fmi->nand, /*ecc_digest(&fmi->ecc, value & 0xff)*/value & 0xff);
@@ -3571,7 +3584,7 @@ static void nuc970_init(MachineState* machine)
     sysbus_realize(s, &error_abort);
     sysbus_mmio_map(s, 0, FMI_BA);
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, FMI_IRQn));
-    
+
     dev = qdev_new(TYPE_NPCM7XX_EMC);
     s = SYS_BUS_DEVICE(dev);
     if (nd_table[0].used) {
@@ -3593,7 +3606,6 @@ static void nuc970_init(MachineState* machine)
      */
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, EMC0_TX_IRQn));
     sysbus_connect_irq(s, 1, qdev_get_gpio_in(aic, EMC0_RX_IRQn));
-    
 
     // test shadow memory region
     /*
@@ -3603,7 +3615,6 @@ static void nuc970_init(MachineState* machine)
     address_space_stl_notdirty(as, 0x3c000000, 0x01234567, MEMTXATTRS_UNSPECIFIED, NULL);
     address_space_stl_notdirty(as, 0xbc000004, 0x89abcdef, MEMTXATTRS_UNSPECIFIED, NULL);
     */
-
     
     //sysbus_create_simple(TYPE_NUC970_SDH, SDH_BA, NULL);
     dev = qdev_new(TYPE_NUC970_SDH);
