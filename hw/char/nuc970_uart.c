@@ -142,13 +142,42 @@ typedef struct NUC970UartReg {
 	uint32_t            reset_value;
 } NUC970UartReg;
 
+/* modem lines */
+/*
+	    TIOCM_LE    DSR (data set ready/line enable)
+	    TIOCM_DTR   DTR (data terminal ready)
+	    TIOCM_RTS   RTS (request to send)
+	    TIOCM_ST    Secondary TXD (transmit)
+	    TIOCM_SR    Secondary RXD (receive)
+	    TIOCM_CTS   CTS (clear to send)
+	    TIOCM_CAR   DCD (data carrier detect)
+	    TIOCM_CD    see TIOCM_CAR
+	    TIOCM_RNG   RNG (ring)
+	    TIOCM_RI    see TIOCM_RNG
+	    TIOCM_DSR   DSR (data set ready)
+*/
+#define TIOCM_LE	0x001	// DCTSF?
+#define TIOCM_DTR	0x002	
+#define TIOCM_RTS	0x004
+#define TIOCM_ST	0x008
+#define TIOCM_SR	0x010
+#define TIOCM_CTS	0x020	// 5
+#define TIOCM_CAR	0x040	// 6
+#define TIOCM_RNG	0x080	// 7
+#define TIOCM_DSR	0x100
+#define TIOCM_CD	TIOCM_CAR
+#define TIOCM_RI	TIOCM_RNG
+#define TIOCM_OUT1	0x2000
+#define TIOCM_OUT2	0x4000
+#define TIOCM_LOOP	0x8000
+
 static const NUC970UartReg nuc970_uart_regs[] = {
 	{"UA_RBR",   ULCON,    0x00000000},
 	{"UA_IER",   UCON,     0x00000000},
 	{"UA_FCR",   UFCON,    0x00000000},
 	{"UA_LCR",   UMCON,    0x00000000},
-	{"UA_MCR",   UTRSTAT,  0x0000f200},
-	{"UA_MSR",   UERSTAT,  0x000001f0},
+	{"UA_MCR",   UTRSTAT,  0x0000f202},
+	{"UA_MSR",   UA_MSR,   0x000001e0},
 	{"UA_FSR",   UFSTAT,   0x10404000}, /* 18: FIFO Status Register */
 	{"UA_ISR",   UMSTAT,   0x00000002}, /* RO */
 	{"UA_TOR",   UTXH,     0x00000000}, /* WO, undefined reset value*/
@@ -581,14 +610,18 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
 		trace_exynos_uart_intclr(s->channel, s->reg[I_(UINTP)]);
 		nuc970_uart_update_irq(s);
 		break;
-	case UTRSTAT:
-		if (val & UTRSTAT_Rx_TIMEOUT) {
-			s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_TIMEOUT;
-		}
+	case UA_MCR:
+		//if (val & UTRSTAT_Rx_TIMEOUT) {
+		//	s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_TIMEOUT;
+		//}
+		s->reg[I_(UA_MCR)] = val & ~(1<<13); // RTS Pin State (Read Only)
+		fprintf(stderr, "  UA_MCR[%d] W: %lx\n", s->channel, val);
 		break;
-	case UERSTAT:
+	case UA_MSR:
+		s->reg[I_(UA_MSR)] = val;
+		fprintf(stderr, "  UA_MSR[%d] W: %lx\n", s->channel, val);
+		break;
 	case UFSTAT:
-	case UMSTAT:
 		trace_exynos_uart_ro_write(
 			s->channel, nuc970_uart_regname(offset), offset);
 		break;
@@ -604,6 +637,12 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
 		s->reg[I_(offset)] = val;
 		// need to update irq
 		nuc970_uart_update_irq(s);
+		break;
+	case UA_ISR:
+		if (val & (1 << 0))
+		{
+
+		}
 		break;
 	default:
 		s->reg[I_(offset)] = val;
@@ -688,6 +727,14 @@ static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
 		//    trace_exynos_uart_wo_read(s->channel, nuc970_uart_regname(offset),
 		//        offset);
 		//    break;
+	case UA_MCR:
+		res = s->reg[I_(UA_MCR)]; // RTS_ST
+		fprintf(stderr, "  UA_MCR[%d] R: %x\n", s->channel, res);
+		break;
+	case UA_MSR:
+		res = s->reg[I_(UA_MSR)];
+		fprintf(stderr, "  UA_MSR[%d] R: %x\n", s->channel, res);
+		break;
 	default:
 		trace_exynos_uart_read(s->channel, offset,
 			nuc970_uart_regname(offset),
@@ -700,7 +747,9 @@ static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
 		0);
 
 	DPRINTF("read(offset=0x%" HWADDR_PRIx ", value=%08x)\n", offset, res);
-
+	//if (offset > 0 && offset != 0x1c && offset != 0x18) {
+	//	fprintf(stderr, "read(offset=0x%" HWADDR_PRIx ", value=%08x)\n", offset, res);
+	//}
 	return res;
 }
 

@@ -2372,6 +2372,9 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
     case 0x8c0: r = fmi->FMI_NANDECTL; break;
     case 0xa00 ... 0xbd4:
         r = fmi->FMI_NANDRA[(offset - 0xa00) / 4];
+        if (offset % 4 != 0) {
+            r = (r >> ((offset % 4) * 8)) & 0xff;
+        }
         //fprintf(stderr, "read ra  (offset=%lx, value=%08x)\n", offset, r);
         break;
     default: 
@@ -2454,7 +2457,6 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
     case 0x8a0:
         if (value & (1 << 0)) {  // SW_RST Software Engine Reset
             printf("********** Software Engine Reset...\n");
-
         }
         else if (value & (1 << 1)) { // DRD_EN DMA Read Data (1 page)
             uint32_t oobSize = fmi->FMI_NANDRACTL & 0xff;
@@ -2492,18 +2494,20 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
             
             DumpHex(page, pageSize);
             for (int i = 0; i < oobSize / 4; i++) {
-                //printf(" %08x", fmi->FMI_NANDRA[i]);
-                //nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  0) & 0xff);
-                //nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  8) & 0xff);
-                //nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 16) & 0xff);
-                //nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 24) & 0xff);
-                nand_setio(fmi->nand, 0xff);
-                nand_setio(fmi->nand, 0xff);
-                nand_setio(fmi->nand, 0xff);
-                nand_setio(fmi->nand, 0xff);
+                printf(" %08x", fmi->FMI_NANDRA[i]);
+                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  0) & 0xff);
+                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  8) & 0xff);
+                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 16) & 0xff);
+                nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 24) & 0xff);
+                //nand_setio(fmi->nand, 0xff);
+                //nand_setio(fmi->nand, 0xff);
+                //nand_setio(fmi->nand, 0xff);
+                //nand_setio(fmi->nand, 0xff);
             }
             
             fmi->FMI_NANDINTSTS |= (1 << 0);
+            if (page)
+                g_free(page);
         }
         else if (value & (1 << 3)) { // REDUN_REN: Redundant Area Read Enable
             printf("********** Redundant Area Read...\n");
@@ -2570,7 +2574,14 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
 
     case 0xa00 ... 0xbd4:
         //fprintf(stderr, "NANDRA (offset=%lx, value=%08lx, size=%d)\n", offset, value, size);
-        fmi->FMI_NANDRA[(offset - 0xa00) / 4] = value;
+        if (offset % 4 != 0) {
+            int shift = offset % 4;
+            fmi->FMI_NANDRA[(offset - 0xa00) / 4] &= ~(0xff << (shift * 8));
+            fmi->FMI_NANDRA[(offset - 0xa00) / 4] |= (value & 0xff) << (shift * 8);
+        }
+        else {
+            fmi->FMI_NANDRA[(offset - 0xa00) / 4] = value;
+        }
         break;
     default:
         fprintf(stderr, "fmi_write(offset=%lx, value=%08lx, size=%d)\n", offset, value, size);
@@ -3617,12 +3628,13 @@ static void nuc970_init(MachineState* machine)
     */
     
     //sysbus_create_simple(TYPE_NUC970_SDH, SDH_BA, NULL);
+    /*
     dev = qdev_new(TYPE_NUC970_SDH);
     s = SYS_BUS_DEVICE(dev);    
     sysbus_realize(s, &error_abort);
     sysbus_mmio_map(s, 0, SDH_BA);
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, SDH_IRQn));
-
+    */
 #ifndef CONFIG_NUC970_LCD
     create_unimplemented_device("nuc970.lcd", LCM_BA, 0x1000);
 #endif

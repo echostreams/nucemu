@@ -188,9 +188,12 @@ spi_read(void* opaque, hwaddr addr, unsigned int size)
     }
 
     DB_PRINT("addr=" TARGET_FMT_plx " = %x\n", addr, r);
-    if (s->cntrl >> 17 & 0x01) {
+    //if (s->cntrl >> 17 & 0x01) {
         //fprintf(stderr, "addr=" TARGET_FMT_plx " = %x\n", addr, r);
-    }
+    //}
+    //if (addr >= 0x10 && addr <= 0x1c) {
+    //    fprintf(stderr, "addr=" TARGET_FMT_plx " = %x\n", addr, r);
+    //}
     return r;
 
 }
@@ -257,6 +260,7 @@ spi_write(void* opaque, hwaddr addr,
 
             if ((value >> 16) & 0x01) { // This bit is read only, but can be cleared by writing 1 to this bit.
                 s->cntrl &= ~(1 << 16); // clear interrupt flag
+                //fprintf(stderr, "...clear SPI IF...\n");
                 update_interrupt(s);
             }
         }
