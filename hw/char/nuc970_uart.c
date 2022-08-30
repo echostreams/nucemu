@@ -174,10 +174,10 @@ typedef struct NUC970UartReg {
 static const NUC970UartReg nuc970_uart_regs[] = {
 	{"UA_RBR",   ULCON,    0x00000000},
 	{"UA_IER",   UCON,     0x00000000},
-	{"UA_FCR",   UFCON,    0x00000000},
-	{"UA_LCR",   UMCON,    0x00000000},
-	{"UA_MCR",   UTRSTAT,  0x0000f202},
-	{"UA_MSR",   UA_MSR,   0x000001e0},
+	{"UA_FCR",   UFCON,    0x00000101},
+	{"UA_LCR",   UMCON,    0x00000007},
+	{"UA_MCR",   UTRSTAT,  0x0000d200},
+	{"UA_MSR",   UA_MSR,   0x000000f0},
 	{"UA_FSR",   UFSTAT,   0x10404000}, /* 18: FIFO Status Register */
 	{"UA_ISR",   UMSTAT,   0x00000002}, /* RO */
 	{"UA_TOR",   UTXH,     0x00000000}, /* WO, undefined reset value*/
@@ -604,12 +604,12 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
 		}
 		break;
 
-	case UINTP:
-		s->reg[I_(UINTP)] &= ~val;
-		s->reg[I_(UINTSP)] &= ~val;
-		trace_exynos_uart_intclr(s->channel, s->reg[I_(UINTP)]);
-		nuc970_uart_update_irq(s);
-		break;
+	//case UINTP:
+	//	s->reg[I_(UINTP)] &= ~val;
+	//	s->reg[I_(UINTSP)] &= ~val;
+	//	trace_exynos_uart_intclr(s->channel, s->reg[I_(UINTP)]);
+	//	nuc970_uart_update_irq(s);
+	//	break;
 	case UA_MCR:
 		//if (val & UTRSTAT_Rx_TIMEOUT) {
 		//	s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_TIMEOUT;

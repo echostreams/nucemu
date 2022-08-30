@@ -3628,13 +3628,13 @@ static void nuc970_init(MachineState* machine)
     */
     
     //sysbus_create_simple(TYPE_NUC970_SDH, SDH_BA, NULL);
-    /*
+    
     dev = qdev_new(TYPE_NUC970_SDH);
     s = SYS_BUS_DEVICE(dev);    
     sysbus_realize(s, &error_abort);
     sysbus_mmio_map(s, 0, SDH_BA);
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, SDH_IRQn));
-    */
+    
 #ifndef CONFIG_NUC970_LCD
     create_unimplemented_device("nuc970.lcd", LCM_BA, 0x1000);
 #endif
