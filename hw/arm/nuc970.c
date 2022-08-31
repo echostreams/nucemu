@@ -404,6 +404,9 @@ static void nuc970_lcd_write(void* opaque, hwaddr offset,
     case 0x28:
         s->va_baddr1 = value;
         break;
+    case 0x38:  // VA_WIN
+        printf("    va wys %ld, wye %ld\n", (value >> 16) & 0x7ff, value & 0x7ff);
+        break;
     case 0x40:
         s->osd_wins = value;
         printf("    osd wxs %ld, wys %ld\n", value & 0x7ff, (value >> 16) & 0x7ff);
@@ -960,7 +963,7 @@ static void nuc970_misc_init(Object* obj)
     SysBusDevice* sd = SYS_BUS_DEVICE(obj);
     NUC970MiscState* s = NUC970_MISC(obj);
 
-    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_misc_ops, NULL,
+    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_misc_ops, s,
         "nuc970-misc", MP_MISC_SIZE);
     sysbus_init_mmio(sd, &s->iomem);
 }
@@ -1160,6 +1163,20 @@ static const TypeInfo nuc970_wdt_info = {
 struct NUC970SdicState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
+
+    uint32_t opmctl;    // addReg(REG_SDIC_OPMCTL, "SDIC_OPMCTL", 0x00030476);
+    uint32_t cmd;       // addReg(REG_SDIC_CMD, "SDIC_CMD", 0x00000020);
+    uint32_t refctl;    // addReg(REG_SDIC_REFCTL, "SDIC_REFCTL", 0x8030);
+    uint32_t size0;     // addReg(REG_SDIC_SIZE0, "SDIC_SIZE0", 0x06); // 5: 32M, 6: 64M, 7: 128M
+    uint32_t size1;     // addReg(REG_SDIC_SIZE1, "SDIC_SIZE1", 0x10000000);
+    uint32_t mr;        // addReg(REG_SDIC_MR, "SDIC_MR", 0x00232);
+    uint32_t emr;       // addReg(REG_SDIC_EMR, "SDIC_EMR", 0x4401);
+    uint32_t emr2;      // addReg(REG_SDIC_EMR2, "SDIC_EMR2", 0x00008000);
+    uint32_t emr3;      // addReg(REG_SDIC_EMR3, "SDIC_EMR3", 0x0c000);
+    uint32_t time;      // addReg(REG_SDIC_TIME, "SDIC_TIME", 0x2bde9649);
+    uint32_t dqsods;    // addReg(REG_SDIC_DQSODS, "SDIC_DQSODS", 0x1010);
+    uint32_t ckdqsds;   // addReg(REG_SDIC_CKDQSDS, "SDIC_CKDQSDS", 0x00888820);
+    uint32_t daensel;   // addReg(REG_SDIC_DAENSEL, "SDIC_DAENSEL", 0x00080);
 };
 
 #define TYPE_NUC970_SDIC "nuc970-sdic"
@@ -1168,18 +1185,53 @@ OBJECT_DECLARE_SIMPLE_TYPE(NUC970SdicState, NUC970_SDIC)
 static uint64_t nuc970_sdic_read(void* opaque, hwaddr offset,
     unsigned size)
 {
-    switch (offset) {
-    case 0x10:  // SDIC_SIZE0
-        return 0x00000006;  // 6: 64M
+    NUC970SdicState* s = (NUC970SdicState*)opaque;
+    uint32_t r = 0;
 
+    switch (offset) {
+    case 0x00:
+        r = s->opmctl;
+        break;
+    case 0x04:
+        r = s->cmd;
+        break;
+    case 0x08:
+        r = s->refctl;
+        break;
+    case 0x10:  // SDIC_SIZE0
+        r = s->size0;
+        break;
+    case 0x14:
+        r = s->size1;
+        break;
+    case 0x18:
+        r = s->mr;
+        break;
+    case 0x1c:
+        r = s->emr; break;
+    case 0x20:
+        r = s->emr2; break;
+    case 0x24:
+        r = s->emr3; break;
+    case 0x28:
+        r = s->time; break;
+    case 0x30:
+        r = s->dqsods; break;
+    case 0x34:
+        r = s->ckdqsds; break;
+    case 0x38:
+        r = s->daensel; break;
     default:
-        return 0;
+        r = 0xffffffff;
     }
+    fprintf(stderr, "sdic_w (offset=%lx, value=%08x)\n", offset, r);
+    return r;
 }
 
 static void nuc970_sdic_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
+    fprintf(stderr, "sdic_w (offset=%lx, value=%08lx)\n", offset, value);
 }
 
 static const MemoryRegionOps nuc970_sdic_ops = {
@@ -1193,9 +1245,23 @@ static void nuc970_sdic_init(Object* obj)
     SysBusDevice* sd = SYS_BUS_DEVICE(obj);
     NUC970SdicState* s = NUC970_SDIC(obj);
 
-    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_sdic_ops, NULL,
+    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_sdic_ops, s,
         "nuc970-sdic", 0x800);
     sysbus_init_mmio(sd, &s->iomem);
+
+    s->opmctl  = 0x00030476;
+    s->cmd     = 0x00000020;
+    s->refctl  = 0x00008030;
+    s->size0   = 0x00000006; // 5: 32M, 6: 64M, 7: 128M
+    s->size1   = 0x10000000;
+    s->mr      = 0x00000232;
+    s->emr     = 0x00004401;
+    s->emr2    = 0x00008000;
+    s->emr3    = 0x0000c000;
+    s->time    = 0x2bde9649;
+    s->dqsods  = 0x00001010;
+    s->ckdqsds = 0x00888820;
+    s->daensel = 0x00000080;
 }
 
 static const TypeInfo nuc970_sdic_info = {
@@ -1853,7 +1919,7 @@ static uint64_t nuc970_rtc_read(void* opaque, hwaddr offset,
         break;
     }
 
-    //fprintf(stderr, "rtc_read(offset=%lx, value=%08x)\n", offset, r);
+    fprintf(stderr, "rtc_read (offset=%lx, value=%08x)\n", offset, r);
     return r;
 }
 
@@ -1861,7 +1927,7 @@ static void nuc970_rtc_write(void* opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
     NUC970RtcState* s = (NUC970RtcState*)opaque;
-    //fprintf(stderr, "rtc_write(offset=%lx, value=%08x)\n", offset, value);
+    fprintf(stderr, "rtc_write(offset=%lx, value=%08lx)\n", offset, value);
     switch (offset)
     {
     case 0x14:
@@ -3588,8 +3654,8 @@ static void nuc970_init(MachineState* machine)
     
     sysbus_create_simple(TYPE_NUC970_WDT, WDT_BA, NULL);
     sysbus_create_simple("nuc970.rng", CRPT_BA, NULL);
-    //sysbus_create_simple(TYPE_NUC970_FMI, FMI_BA, NULL);
     
+    //sysbus_create_simple(TYPE_NUC970_FMI, FMI_BA, NULL);    
     dev = qdev_new(TYPE_NUC970_FMI);
     s = SYS_BUS_DEVICE(dev);
     sysbus_realize(s, &error_abort);
@@ -3746,10 +3812,10 @@ static const TypeInfo mv88w8618_wlan_info = {
 
 static void nuc970_register_types(void)
 {
-    type_register_static(&mv88w8618_pic_info);
-    type_register_static(&mv88w8618_pit_info);
-    type_register_static(&mv88w8618_flashcfg_info);
-    type_register_static(&mv88w8618_wlan_info);
+    //type_register_static(&mv88w8618_pic_info);
+    //type_register_static(&mv88w8618_pit_info);
+    //type_register_static(&mv88w8618_flashcfg_info);
+    //type_register_static(&mv88w8618_wlan_info);
     type_register_static(&nuc970_lcd_info);
     type_register_static(&nuc970_gpio_info);
     type_register_static(&nuc970_key_info);

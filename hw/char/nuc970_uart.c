@@ -177,7 +177,7 @@ static const NUC970UartReg nuc970_uart_regs[] = {
 	{"UA_FCR",   UFCON,    0x00000101},
 	{"UA_LCR",   UMCON,    0x00000007},
 	{"UA_MCR",   UTRSTAT,  0x0000d200},
-	{"UA_MSR",   UA_MSR,   0x000000f0},
+	{"UA_MSR",   UA_MSR,   0x000001f0},
 	{"UA_FSR",   UFSTAT,   0x10404000}, /* 18: FIFO Status Register */
 	{"UA_ISR",   UMSTAT,   0x00000002}, /* RO */
 	{"UA_TOR",   UTXH,     0x00000000}, /* WO, undefined reset value*/
@@ -587,9 +587,7 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
 		}
 		break;
 
-	case UA_THR:
-
-		
+	case UA_THR:		
 
 		if (qemu_chr_fe_backend_connected(&s->chr)) {
 			//s->reg[I_(UTRSTAT)] &= ~(UTRSTAT_TRANSMITTER_EMPTY | UTRSTAT_Tx_BUFFER_EMPTY);
@@ -600,6 +598,7 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
 			trace_exynos_uart_tx(s->channel, ch);
 			//s->reg[I_(UTRSTAT)] |= UTRSTAT_TRANSMITTER_EMPTY | UTRSTAT_Tx_BUFFER_EMPTY;
 			//s->reg[I_(UINTSP)] |= UINTSP_TXD;
+			s->reg[I_(UA_ISR)] &= ~(1 << 1);
 			nuc970_uart_update_irq(s);
 		}
 		break;
@@ -695,12 +694,12 @@ static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
 				res = fifo_retrieve(&s->rx);
 				trace_exynos_uart_rx(s->channel, res);
 				if (!fifo_elements_number(&s->rx)) {
-					s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_BUFFER_DATA_READY;
+					//s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_BUFFER_DATA_READY;
 
 					
 				}
 				else {
-					s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_BUFFER_DATA_READY;
+					//s->reg[I_(UTRSTAT)] |= UTRSTAT_Rx_BUFFER_DATA_READY;
 				}
 
 				s->reg[I_(UA_ISR)] &= ~TOUT_IF;	// clear TOUT_IF
@@ -711,7 +710,7 @@ static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
 		}
 		else {
 				trace_exynos_uart_rx_error(s->channel);
-				s->reg[I_(UINTSP)] |= UINTSP_ERROR;
+				//s->reg[I_(UINTSP)] |= UINTSP_ERROR;
 				nuc970_uart_update_irq(s);
 				res = 0;
 		}

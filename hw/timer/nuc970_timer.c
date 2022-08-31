@@ -678,8 +678,8 @@ static void npcm7xx_timer_init(Object* obj)
     s->clock = qdev_init_clock_in(dev, "clock", NULL, NULL, 0);
 
     //clock_update_hz(s->clock, 12 * 1000 * 1000); /* 12MHz */
-    //clock_set_hz(s->clock, 12 * 1000 * 1000); /* 12MHz */
-    clock_set_hz(s->clock, 24 * 1000 * 1000); /* 24MHz */
+    clock_set_hz(s->clock, 12 * 1000 * 1000); /* 12MHz */
+    //clock_set_hz(s->clock, 24 * 1000 * 1000); /* 24MHz */
 
     info_report("NUC970 Timer clock period %" PRId64 "\n", s->clock->period);
 }
