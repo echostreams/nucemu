@@ -222,17 +222,24 @@ struct nuc970_lcd_state {
     uint32_t page;
     uint32_t page_off;
     QemuConsole* con;
+    qemu_irq irq;
     //uint8_t video_ram[128 * 64 / 8];
     uint8_t video_ram[800 * 480 * 2];
     uint8_t osd_ram[320 * 240 * 2];
 
     uint32_t dccs;      // 
     uint32_t devctrl;
+    uint32_t int_cs;
     uint32_t crtc_size; // CRTC_SIZE
     uint32_t crtc_dend; // CRTC_DEND
-
+    uint32_t crtc_hr;
+    uint32_t crtc_hsync;
+    uint32_t crtc_vr;
     uint32_t va_baddr0; // VA_BADDR0
     uint32_t va_baddr1; // VA_BADDR1
+    uint32_t va_fbctrl;
+    uint32_t va_scale;
+    uint32_t va_win;    // VA_WIN
     uint32_t osd_wins;  // starting coordinates register
     uint32_t osd_wine;  // ending coordinates register
     uint32_t osd_baddr; // 
@@ -251,21 +258,6 @@ static uint8_t scale_lcd_color(nuc970_lcd_state* s, uint8_t col)
 }
 */
 
-static inline void set_lcd_pixel32(nuc970_lcd_state* s,
-    int x, int y, uint32_t col)
-{
-    int dx, dy;
-    DisplaySurface* surface = qemu_console_surface(s->con);
-    uint32_t* pixel =
-        &((uint32_t*)surface_data(surface))[(y * 128 * 3 + x) * 3];
-
-    for (dy = 0; dy < 3; dy++, pixel += 127 * 3) {
-        for (dx = 0; dx < 3; dx++, pixel++) {
-            *pixel = col;
-        }
-    }
-}
-
 static void lcd_refresh(void* opaque)
 {
     int x, y;
@@ -274,12 +266,8 @@ static void lcd_refresh(void* opaque)
     nuc970_lcd_state* s = opaque;    
     DisplaySurface* surface = qemu_console_surface(s->con);
     uint8_t* data_display;
-    uint8_t* osd_display;
+    uint8_t* osd_display;    
     
-
-    //col = rgb_to_pixel32(scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 16) & 0xff),
-    //    scale_lcd_color(s, (MP_LCD_TEXTCOLOR >> 8) & 0xff),
-    //    scale_lcd_color(s, MP_LCD_TEXTCOLOR & 0xff));
     if (s->dccs & (1 << 1)) {   // VA_EN
         if (dma_memory_read(&address_space_memory, s->va_baddr0, s->video_ram,
             sizeof(s->video_ram), MEMTXATTRS_UNSPECIFIED)) {
@@ -347,14 +335,14 @@ static void lcd_refresh(void* opaque)
 static void lcd_invalidate(void* opaque)
 {
 }
-
+/*
 static void nuc970_lcd_gpio_brightness_in(void* opaque, int irq, int level)
 {
     nuc970_lcd_state* s = opaque;
     s->brightness &= ~(1 << irq);
     s->brightness |= level << irq;
 }
-
+*/
 static uint64_t nuc970_lcd_read(void* opaque, hwaddr offset,
     unsigned size)
 {
@@ -364,8 +352,11 @@ static uint64_t nuc970_lcd_read(void* opaque, hwaddr offset,
     case 0x00:
         r = s->dccs;
         break;
-    case MP_LCD_IRQCTRL:
-        r = s->irqctrl;
+    case 0x04:
+        r = s->devctrl;
+        break;
+    case 0x0c:
+        r = s->int_cs;
         break;
     default:
         r = 0;
@@ -389,14 +380,32 @@ static void nuc970_lcd_write(void* opaque, hwaddr offset,
     case 0x04:
         s->devctrl = value;
         break;
+    case 0x0c:
+        s->int_cs = value;
+        if (value & 0xf0000000) {   //[31:28] Write-clear
+            s->int_cs &= ~(value & 0xf0000000);
+        }
+        break;
     case 0x10:
         s->crtc_size = value;
+        printf("    vtt %ld, htt %ld\n", (value >> 16) & 0x7ff, value & 0x7ff);
         break;
     case 0x14:
         s->crtc_dend = value;
-
         qemu_console_resize(s->con, (value & 0x7ff),  ((value >> 16) & 0x7ff));
-
+        printf("    vdend %ld, hdend %ld\n", (value >> 16) & 0x7ff, value & 0x7ff);
+        break;
+    case 0x18:
+        s->crtc_hr = value;
+        printf("    hrs %ld, hre %ld\n", value & 0x7ff, (value >> 16) & 0x7ff);
+        break;
+    case 0x1c:
+        s->crtc_hsync = value;
+        printf("    hsync_s %ld, hsync_e %ld\n", value & 0x7ff, (value >> 16) & 0x7ff);
+        break;
+    case 0x20:
+        s->crtc_vr = value;
+        printf("    vrs %ld, vre %ld\n", value & 0x7ff, (value >> 16) & 0x7ff);
         break;
     case 0x24:
         s->va_baddr0 = value;
@@ -419,38 +428,7 @@ static void nuc970_lcd_write(void* opaque, hwaddr offset,
         s->osd_baddr = value;
         break;
 
-    case MP_LCD_IRQCTRL:
-        s->irqctrl = value;
-        break;
-
-    case MP_LCD_SPICTRL:
-        if (value == MP_LCD_SPI_DATA || value == MP_LCD_SPI_CMD) {
-            s->mode = value;
-        }
-        else {
-            s->mode = MP_LCD_SPI_INVALID;
-        }
-        break;
-
-    case MP_LCD_INST:
-        if (value >= MP_LCD_INST_SETPAGE0 && value <= MP_LCD_INST_SETPAGE7) {
-            s->page = value - MP_LCD_INST_SETPAGE0;
-            s->page_off = 0;
-        }
-        break;
-
-    case MP_LCD_DATA:
-        if (s->mode == MP_LCD_SPI_CMD) {
-            if (value >= MP_LCD_INST_SETPAGE0 &&
-                value <= MP_LCD_INST_SETPAGE7) {
-                s->page = value - MP_LCD_INST_SETPAGE0;
-                s->page_off = 0;
-            }
-        }
-        else if (s->mode == MP_LCD_SPI_DATA) {
-            s->video_ram[s->page * 128 + s->page_off] = value;
-            s->page_off = (s->page_off + 1) & 127;
-        }
+    default:
         break;
     }
 }
@@ -486,6 +464,7 @@ static void nuc970_lcd_init(Object* obj)
     sysbus_init_mmio(sbd, &s->iomem);
 
     //qdev_init_gpio_in(dev, nuc970_lcd_gpio_brightness_in, 3);
+    sysbus_init_irq(sbd, &s->irq);
 }
 
 static const VMStateDescription nuc970_lcd_vmsd = {
