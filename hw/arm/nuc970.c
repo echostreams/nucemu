@@ -2506,8 +2506,8 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
         else if (value & (1 << 1)) { // DRD_EN DMA Read Data (1 page)
             uint32_t oobSize = fmi->FMI_NANDRACTL & 0xff;
             uint32_t pageSize = fmiPageSize(fmi);
-            printf("********** DMA Read Page for %08x, size: %d, oob: %d\n",
-                fmi->FMI_DMASA, pageSize, oobSize);            
+            //printf("********** DMA Read Page for %08x, size: %d, oob: %d\n",
+            //    fmi->FMI_DMASA, pageSize, oobSize);            
             uint8_t *page = g_malloc(pageSize + oobSize);
             for (int i = 0; i < (pageSize + oobSize); i++)
             {
@@ -2525,7 +2525,7 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
                 g_free(page);
         }
         else if (value & (1 << 2)) { // DWR_EN DMA Write Data (1 page)
-            printf("********** DMA Write Data...\n");
+            //printf("********** DMA Write Data...\n");
             uint32_t oobSize = fmi->FMI_NANDRACTL & 0xff;
             uint32_t pageSize = fmiPageSize(fmi);
             uint8_t *page = g_malloc(pageSize);
@@ -2537,9 +2537,9 @@ static void nuc970_fmi_write(void* opaque, hwaddr offset,
                 nand_setio(fmi->nand, page[i]);
             }
             
-            DumpHex(page, pageSize);
+            //DumpHex(page, pageSize);
             for (int i = 0; i < oobSize / 4; i++) {
-                printf(" %08x", fmi->FMI_NANDRA[i]);
+                //printf(" %08x", fmi->FMI_NANDRA[i]);
                 nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  0) & 0xff);
                 nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >>  8) & 0xff);
                 nand_setio(fmi->nand, (fmi->FMI_NANDRA[i] >> 16) & 0xff);
