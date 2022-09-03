@@ -614,6 +614,13 @@ static void nuc970_uart_write(void* opaque, hwaddr offset,
 		//	s->reg[I_(UTRSTAT)] &= ~UTRSTAT_Rx_TIMEOUT;
 		//}
 		s->reg[I_(UA_MCR)] = val & ~(1<<13); // RTS Pin State (Read Only)
+		if (val & (1 << 9)) // LEV_RTS High level triggered.
+		{
+			s->reg[I_(UA_MCR)] |= (1 << 13);
+		}
+		else // Low level triggered
+		{
+		}
 		fprintf(stderr, "  UA_MCR[%d] W: %lx\n", s->channel, val);
 		break;
 	case UA_MSR:
@@ -727,7 +734,7 @@ static uint64_t nuc970_uart_read(void* opaque, hwaddr offset,
 		//        offset);
 		//    break;
 	case UA_MCR:
-		res = s->reg[I_(UA_MCR)]; // RTS_ST
+		res = s->reg[I_(UA_MCR)]; 
 		fprintf(stderr, "  UA_MCR[%d] R: %x\n", s->channel, res);
 		break;
 	case UA_MSR:

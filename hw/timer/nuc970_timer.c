@@ -301,11 +301,7 @@ static void npcm7xx_timer_write_tcsr(NPCM7xxTimer* t, uint32_t new_tcsr)
             __func__, new_tcsr);
         new_tcsr &= ~NPCM7XX_TCSR_RSVD;
     }
-    if (new_tcsr & NPCM7XX_TCSR_CACT) {
-        qemu_log_mask(LOG_GUEST_ERROR, "%s: read-only bits in 0x%08x ignored\n",
-            __func__, new_tcsr);
-        new_tcsr &= ~NPCM7XX_TCSR_CACT;
-    }
+    
     if ((new_tcsr & NPCM7XX_TCSR_CRST) && (new_tcsr & NPCM7XX_TCSR_CEN)) {
         qemu_log_mask(LOG_GUEST_ERROR,
             "%s: both CRST and CEN set; ignoring CEN.\n",

@@ -268,12 +268,12 @@ static void imx_phy_write(NPCM7xxEMCState* s, int reg, uint32_t val)
     case 18:
     case 27:
     case 31:
-        qemu_log_mask(LOG_UNIMP, "[%s.phy)%s: reg %d not implemented\n",
-            TYPE_NPCM7XX_EMC, __func__, reg);
+        qemu_log_mask(LOG_UNIMP, "[%s.phy)%s: reg %d not implemented (value=%08x)\n",
+            TYPE_NPCM7XX_EMC, __func__, reg, val);
         break;
     default:
-        qemu_log_mask(LOG_GUEST_ERROR, "[%s.phy]%s: Bad address at offset %d\n",
-            TYPE_NPCM7XX_EMC, __func__, reg);
+        qemu_log_mask(LOG_GUEST_ERROR, "[%s.phy]%s: Bad address at offset %d (value=%08x)\n",
+            TYPE_NPCM7XX_EMC, __func__, reg, val);
         break;
     }
 }

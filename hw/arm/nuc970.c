@@ -1426,47 +1426,7 @@ static const TypeInfo nuc970_clk_info = {
 
 
 
-//////////////////
 
-/* WLAN register offsets */
-#define MP_WLAN_MAGIC1          0x11c
-#define MP_WLAN_MAGIC2          0x124
-
-static uint64_t mv88w8618_wlan_read(void* opaque, hwaddr offset,
-    unsigned size)
-{
-    switch (offset) {
-        /* Workaround to allow loading the binary-only wlandrv.ko crap
-         * from the original Freecom firmware. */
-    case MP_WLAN_MAGIC1:
-        return ~3;
-    case MP_WLAN_MAGIC2:
-        return -1;
-
-    default:
-        return 0;
-    }
-}
-
-static void mv88w8618_wlan_write(void* opaque, hwaddr offset,
-    uint64_t value, unsigned size)
-{
-}
-
-static const MemoryRegionOps mv88w8618_wlan_ops = {
-    .read = mv88w8618_wlan_read,
-    .write = mv88w8618_wlan_write,
-    .endianness = DEVICE_NATIVE_ENDIAN,
-};
-
-static void mv88w8618_wlan_realize(DeviceState* dev, Error** errp)
-{
-    MemoryRegion* iomem = g_new(MemoryRegion, 1);
-
-    memory_region_init_io(iomem, OBJECT(dev), &mv88w8618_wlan_ops, NULL,
-        "nuc970-wlan", MP_WLAN_SIZE);
-    sysbus_init_mmio(SYS_BUS_DEVICE(dev), iomem);
-}
 
 /* GPIO register offsets */
 #define MP_GPIO_OE_LO           0x008
@@ -3396,6 +3356,123 @@ static void nuc970_eeprom_init(I2CBus* bus, uint8_t addr, uint32_t rsize)
 }
 */
 
+#define TYPE_NUC970_EHCI "nuc970-ehci-usb"
+#define TYPE_NUC970_OHCI "nuc970-ohci-usb"
+OBJECT_DECLARE_SIMPLE_TYPE(NUC970EHCIState, NUC970_EHCI)
+
+struct NUC970EHCIState {
+    /*< private >*/
+    EHCISysBusState parent_obj;
+    /*< public >*/
+    MemoryRegion mem_vendor;
+};
+
+static uint64_t nuc970_ehci_read(void* opaque, hwaddr addr, unsigned size)
+{
+    EHCIState* s = opaque;
+    hwaddr off = 0xc4 + addr;
+    printf(" USBPCR R %08lx\n", addr);
+    switch (off) {
+    case 0xc4:  // USB PHY 0 Control Register
+        return 0x00000060;
+    case 0xc8:  // USB PHY 1 Control Register      
+        return 0x00000060;
+    }
+    return 0;
+}
+
+static void nuc970_ehci_write(void* opaque, hwaddr addr, uint64_t val,
+    unsigned size)
+{
+    printf(" USBPCR W %08lx %08lx\n", addr, val);
+}
+
+static const MemoryRegionOps nuc970_ehci_mmio_ops = {
+    .read = nuc970_ehci_read,
+    .write = nuc970_ehci_write,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 4,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+};
+
+static void nuc970_ehci_init(Object* obj)
+{
+    EHCISysBusState* i = SYS_BUS_EHCI(obj);
+    NUC970EHCIState* f = NUC970_EHCI(obj);
+    EHCIState* s = &i->ehci;
+
+    memory_region_init_io(&f->mem_vendor, OBJECT(f), &nuc970_ehci_mmio_ops, s,
+        "nuc970-upscr", 0x8);
+    memory_region_add_subregion(&s->mem,
+        0xc4,   // 0xc4 USBPCR0, 0xc8 USBPCR1
+        &f->mem_vendor);
+}
+static void nuc970_ehci_class_init(ObjectClass* oc, void* data)
+{
+    SysBusEHCIClass* sec = SYS_BUS_EHCI_CLASS(oc);
+    DeviceClass* dc = DEVICE_CLASS(oc);
+
+    sec->capsbase = 0x0;
+    sec->opregbase = 0x20;  // UCMDR
+    //sec->portscbase = 0x64;
+    //sec->portnr = 2;
+    set_bit(DEVICE_CATEGORY_USB, dc->categories);
+}
+
+static const TypeInfo nuc970_ehci_type_info = {
+    .name = TYPE_NUC970_EHCI,
+    .parent = TYPE_SYS_BUS_EHCI,
+    .instance_size = sizeof(NUC970EHCIState),
+    .instance_init = nuc970_ehci_init,
+    .class_init = nuc970_ehci_class_init,
+};
+
+struct NUC970OhciState {
+    SysBusDevice parent_obj;
+    MemoryRegion iomem;
+};
+
+OBJECT_DECLARE_SIMPLE_TYPE(NUC970OhciState, NUC970_OHCI)
+
+static uint64_t nuc970_ohci_read(void* opaque, hwaddr offset,
+    unsigned size)
+{
+    printf(" OHCI R %08lx/%d\n", offset, size);
+    switch (offset) {
+    default:
+        return 0;
+    }
+}
+
+static void nuc970_ohci_write(void* opaque, hwaddr offset,
+    uint64_t value, unsigned size)
+{
+    printf(" OHCI W %08lx/%d %08lx\n", offset, size, value);
+}
+
+static const MemoryRegionOps nuc970_ohci_ops = {
+    .read = nuc970_ohci_read,
+    .write = nuc970_ohci_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
+static void nuc970_ohci_init(Object* obj)
+{
+    SysBusDevice* sd = SYS_BUS_DEVICE(obj);
+    NUC970OhciState* s = NUC970_OHCI(obj);
+
+    memory_region_init_io(&s->iomem, OBJECT(s), &nuc970_ohci_ops, s,
+        "nuc970-ohci-opmoden", 4);
+    sysbus_init_mmio(sd, &s->iomem);
+}
+
+static const TypeInfo nuc970_ohci_info = {
+    .name = TYPE_NUC970_OHCI,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_init = nuc970_ohci_init,
+    .instance_size = sizeof(NUC970OhciState),
+};
+
 static void nuc970_init(MachineState* machine)
 {
     ARMCPU* cpu;
@@ -3721,7 +3798,9 @@ static void nuc970_init(MachineState* machine)
         *  -drive file=/path/to/usbimg,if=none,id=stick,format=raw,index=1 // index=0 used by i2c eeprom
         *  -device usb-storage,bus=usb-bus.0,drive=stick
         */
-        dev = qdev_new(TYPE_PLATFORM_EHCI);
+
+        //dev = qdev_new(TYPE_PLATFORM_EHCI);
+        dev = qdev_new(TYPE_NUC970_EHCI);
         //object_initialize_child(obj, "ehci[*]", &s->ehci[i],
         //    TYPE_PLATFORM_EHCI);
         object_property_set_bool(OBJECT(dev), "companion-enable",
@@ -3735,10 +3814,21 @@ static void nuc970_init(MachineState* machine)
         //object_initialize_child(obj, "ohci[*]", &s->ohci[i],
         //    TYPE_SYSBUS_OHCI);
         object_property_set_str(OBJECT(dev), "masterbus", "usb-bus.0", &error_fatal);
+        object_property_set_int(OBJECT(dev), "num-ports", 2, &error_fatal);
         sysbus_realize(SYS_BUS_DEVICE(dev), &error_fatal);
         sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, USBO_BA);
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0, qdev_get_gpio_in(aic, OHCI_IRQn));         
-        
+
+        DeviceState* opmoden = qdev_new(TYPE_NUC970_OHCI);
+        //TYPE_SYSBUS_OHCI size is 0x100, opmoden(0x204) is not a subregion
+        //memory_region_add_subregion_overlap(
+        //    sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0), // ohci sysbus
+        //    0x204,
+        //    sysbus_mmio_get_region(SYS_BUS_DEVICE(opmoden), 0), 1
+        //);
+        sysbus_realize(SYS_BUS_DEVICE(opmoden), &error_fatal);
+        sysbus_mmio_map(SYS_BUS_DEVICE(opmoden), 0, USBO_BA + 0x204);
+
     }
     /* If the user specified a -bios image, we put it to 0xe00000 and bypass
      * the normal Linux boot process. 
@@ -3775,20 +3865,6 @@ static void nuc970_machine_init(MachineClass* mc)
 
 DEFINE_MACHINE("nuc970", nuc970_machine_init)
 
-static void mv88w8618_wlan_class_init(ObjectClass* klass, void* data)
-{
-    DeviceClass* dc = DEVICE_CLASS(klass);
-
-    dc->realize = mv88w8618_wlan_realize;
-}
-
-static const TypeInfo mv88w8618_wlan_info = {
-    .name = "nuc970_wlan",
-    .parent = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(SysBusDevice),
-    .class_init = mv88w8618_wlan_class_init,
-};
-
 static void nuc970_register_types(void)
 {
     //type_register_static(&mv88w8618_pic_info);
@@ -3806,6 +3882,8 @@ static void nuc970_register_types(void)
     type_register_static(&nuc970_rtc_info);
     type_register_static(&nuc970_fmi_info);
     type_register_static(&nuc970_sdh_info);
+    type_register_static(&nuc970_ohci_info);
+    type_register_static(&nuc970_ehci_type_info);
 }
 
 type_init(nuc970_register_types)
