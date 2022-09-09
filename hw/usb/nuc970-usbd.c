@@ -39,6 +39,16 @@ typedef struct {
     QemuThread usbip_thread;
     QemuMutex usbip_mutex;
     QemuCond usbip_cond;
+    QemuMutex usbip_rx_mtx;
+    uint32_t usbip_rx_buffer[4096];
+    uint32_t usbip_rx_level;
+    uint32_t usbip_tx_wlen;
+    QemuMutex usbip_tx_mtx;
+    uint32_t usbip_tx_buffer[4096];
+    uint32_t usbip_tx_level;
+    uint16_t usbip_pending_tx_size[12];
+    uint16_t usbip_pending_tx_bytes[12];
+    QemuCond usip_reply_ready;
 
     uint32_t GINTSTS;
     uint32_t RESERVE0[1];
@@ -286,7 +296,7 @@ void handle_device_list(const USB_DEVICE_DESCRIPTOR* dev_dsc, OP_REP_DEVLIST* li
     }
 };
 
-void handle_attach(const USB_DEVICE_DESCRIPTOR* dev_dsc, OP_REP_IMPORT* rep)
+void usbd_handle_attach(const USB_DEVICE_DESCRIPTOR* dev_dsc, OP_REP_IMPORT* rep)
 {
     CONFIG_GEN* conf = (CONFIG_GEN*)_configuration;
 
@@ -840,12 +850,16 @@ static void* nuc970_usbip_thread_run(void* opaque)
 #ifdef _DEBUG
                     print_recv(busid, 32, "Busid");
 #endif
-                    handle_attach(&_dev_dsc, &rep);
-                    if (send(sockfd, (char*)&rep, sizeof(OP_REP_IMPORT), 0) != sizeof(OP_REP_IMPORT))
+                    
+                    usbd_handle_attach(&_dev_dsc, &rep);
+                    int ret = send(sockfd, (char*)&rep, sizeof(OP_REP_IMPORT), 0);
+                    printf("handle attach send: %d\n", ret);
+                    if ( ret != sizeof(OP_REP_IMPORT))
                     {
                         printf("send error : %s \n", strerror(errno));
                         break;
                     };
+                    printf("attached\n");
                     attached = 1;
                 }
             }
@@ -1025,6 +1039,11 @@ static void nuc970_usbd_realize(DeviceState* dev, Error** errp)
     USBD_T* s = NUC970_USBD(dev);
     qemu_mutex_init(&s->usbip_mutex);
     qemu_cond_init(&s->usbip_cond);
+
+    qemu_mutex_init(&s->usbip_rx_mtx);
+    qemu_mutex_init(&s->usbip_tx_mtx);
+    qemu_cond_init(&s->usip_reply_ready);
+
     qemu_thread_create(&s->usbip_thread, "usbip", 
         nuc970_usbip_thread_run, &s->usbip_cfg, QEMU_THREAD_JOINABLE);
 }
@@ -1049,6 +1068,14 @@ typedef union {
     } DEV QEMU_PACKED;
 } buffer_header_t;
 
+enum {
+    BUFFER_PKTSTS_GNAK = 1U,
+    BUFFER_PKTSTS_OUT = 2U,
+    BUFFER_PKTSTS_OUTCPLT = 3U,
+    BUFFER_PKTSTS_SETUPCPLT = 4U,
+    BUFFER_PKTSTS_SETUP = 6U
+};
+
 static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP_RET_SUBMIT* usb_req)
 {
     printf("Handle packet called: Setup: %llx\n", cmd->setup);
@@ -1056,7 +1083,7 @@ static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USB
     //STM32F4xxUSBState* s = STM32F4xx_USB(self);
     USBD_T* s = NUC970_USBD(self);
     printf("****MPS %d\n", s->EP[0].EPMPS);
-    /*
+    
     buffer_header_t header;
     char payload[255];
     uint8_t payload_size = 0;
@@ -1095,6 +1122,7 @@ static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USB
     {
         printf("UNHANDLED PKTSTS!\n");
     }
+
     if (cmd->transfer_buffer_length != 0 && cmd->direction == 0)
     {
         if (usbip_read_payload(&s->usbip_cfg, payload, cmd->transfer_buffer_length))
@@ -1106,10 +1134,12 @@ static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USB
             printf("XFER BUF LENGTH ERR\n");
         }
     }
+    printf(" >>>>>>>>>>>>>>>> \n");
     uint32_t word_count = sizeof(usb_req->setup) / sizeof(uint32_t);
     uint32_t* setup_words = (uint32_t*)&usb_req->setup;
-    pthread_mutex_lock(&s->usbip_rx_mtx);
+    qemu_mutex_lock(&s->usbip_rx_mtx);
     s->usbip_rx_buffer[0] = header.raw;
+    printf(" ================ \n");
     if (has_setup)
     {
         for (int i = 0; i < word_count; i++)
@@ -1130,20 +1160,20 @@ static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USB
         memcpy(&s->usbip_rx_buffer[s->usbip_rx_level], payload, payload_size);
         s->usbip_rx_level += ((payload_size + 3) / 4U);
     }
-    pthread_mutex_unlock(&s->usbip_rx_mtx);
-    pthread_mutex_lock(&s->usbip_tx_mtx);
+    qemu_mutex_unlock(&s->usbip_rx_mtx);
+    qemu_mutex_lock(&s->usbip_tx_mtx);
     s->usbip_tx_wlen = cmd->transfer_buffer_length;
     // if (reply_required) 
     // {
-    pthread_cond_wait(&s->usip_reply_ready, &s->usbip_tx_mtx);
+    qemu_cond_wait(&s->usip_reply_ready, &s->usbip_tx_mtx);
     // }
     //printf("Reply ready\n");
     header.raw = s->usbip_tx_buffer[0];
     usbip_send_reply(&s->usbip_cfg, usb_req, (char*)&s->usbip_tx_buffer[1], header.DEV.BCNT, 0);
     // Wipe data from buffer.
     s->usbip_tx_level = 0;
-    pthread_mutex_unlock(&s->usbip_tx_mtx);
-    */
+    qemu_mutex_unlock(&s->usbip_tx_mtx);
+    
 }
 
 static void nuc970_usbd_class_init(ObjectClass* klass, void* data)
