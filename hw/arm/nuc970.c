@@ -3771,7 +3771,12 @@ static void nuc970_init(MachineState* machine)
     create_unimplemented_device("nuc970.ebi", EBI_BA, 0x800);
     create_unimplemented_device("nuc970.emc1", EMC1_BA, 0x1000);
     //create_unimplemented_device("nuc970.ehci", USBH_BA, 0x1000);
-    create_unimplemented_device("nuc970.usbd", USBD_BA, 0x1000);
+    //create_unimplemented_device("nuc970.usbd", USBD_BA, 0x1000);
+    dev = qdev_new("nuc970-usbd");
+    sysbus_realize(SYS_BUS_DEVICE(dev), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, USBD_BA);
+    sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0, qdev_get_gpio_in(aic, USBD_IRQn));
+     
     //create_unimplemented_device("nuc970.ohci", USBO_BA, 0x1000);
     create_unimplemented_device("nuc970.i2s", ACTL_BA, 0x1000);
     create_unimplemented_device("nuc970.jpeg", JPEG_BA, 0x1000);

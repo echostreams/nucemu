@@ -103,11 +103,16 @@
     <ClCompile Include="hw\ssi\nuc970_spi.c" />
     <ClCompile Include="hw\timer\nuc970_timer.c" />
     <ClCompile Include="hw\timer\nuc970_timer2.c" />
+    <ClCompile Include="hw\usb\nuc970-usbd.c" />
+    <ClCompile Include="hw\usb\usbip_server.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="Makefile" />
     <ClCompile Include="tests\qtest\boot-serial-test.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="hw\usb\nuc970-usbd.h" />
+    <ClInclude Include="hw\usb\usbip.h" />
+    <ClInclude Include="hw\usb\usbip_server.h" />
     <ClInclude Include="include\hw\arm\nuc970.h" />
     <ClInclude Include="include\hw\char\nuc970_uart.h" />
     <ClInclude Include="include\hw\i2c\nuc970_i2c.h" />
@@ -129,6 +134,7 @@
     <None Include="hw\net\meson.build" />
     <None Include="hw\ssi\meson.build" />
     <None Include="hw\timer\meson.build" />
+    <None Include="hw\usb\meson.build" />
     <None Include="meson.build" />
     <None Include="VERSION" />
   </ItemGroup>
