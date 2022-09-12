@@ -297,6 +297,14 @@ extern void usbip_send_reply(usbip_cfg_t* cfg, USBIP_RET_SUBMIT* usb_req, const 
             printf("send error : %s \n", strerror(errno));
             exit(-1);
         };
+        printf("\033[0;32m");
+        for (int i = 0; i < size; i++) {
+            printf(" %02x", data[i]);
+            if ((i + 1) % 16 == 0)
+                printf("\n");
+        }
+        printf("\n\033[0m");
+
     }
 }
 
