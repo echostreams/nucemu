@@ -189,36 +189,37 @@ const CONFIG_MSC  configuration_msc = {
         0,                      // Configuration string index
         0xC0,
         50,                     // Max power consumption (2X mA)
-        },
-        {
-            /* Interface Descriptor */
-            0x09,//sizeof(USB_INTF_DSC),   // Size of this descriptor in bytes
-            USB_DESCRIPTOR_INTERFACE,               // INTERFACE descriptor type
-            0,                      // Interface Number
-            0,                      // Alternate Setting Number
-            2,                      // Number of endpoints in this intf
-            0,                      // Class code
-            0,                      // Subclass code
-            0,                      // Protocol code
-            0                       // Interface string index
-            },
-            {
-                /* Endpoint Descriptor */
-                0x07,/*sizeof(USB_EP_DSC)*/
-                USB_DESCRIPTOR_ENDPOINT,    //Endpoint Descriptor
-                0x81,                       //EndpointAddress
-                0x02,                       //Attributes
-                0x0200,                     //size
-                0x01                        //Interval
-                },{
-                    /* Endpoint Descriptor */
-                    0x07,/*sizeof(USB_EP_DSC)*/
-                    USB_DESCRIPTOR_ENDPOINT,    //Endpoint Descriptor
-                    0x02,                       //EndpointAddress
-                    0x02,                       //Attributes
-                    0x0200,                     //size
-                    0x01                        //Interval
-                }
+    },
+    {
+        /* Interface Descriptor */
+        0x09,//sizeof(USB_INTF_DSC),   // Size of this descriptor in bytes
+        USB_DESCRIPTOR_INTERFACE,               // INTERFACE descriptor type
+        0,                      // Interface Number
+        0,                      // Alternate Setting Number
+        2,                      // Number of endpoints in this intf
+        0,                      // Class code
+        0,                      // Subclass code
+        0,                      // Protocol code
+        0                       // Interface string index
+    },
+    {
+        /* Endpoint Descriptor */
+        0x07,/*sizeof(USB_EP_DSC)*/
+        USB_DESCRIPTOR_ENDPOINT,    //Endpoint Descriptor
+        0x81,                       //EndpointAddress
+        0x02,                       //Attributes
+        0x0200,                     //size
+        0x01                        //Interval
+    },
+    {
+        /* Endpoint Descriptor */
+        0x07,/*sizeof(USB_EP_DSC)*/
+        USB_DESCRIPTOR_ENDPOINT,    //Endpoint Descriptor
+        0x02,                       //EndpointAddress
+        0x02,                       //Attributes
+        0x0200,                     //size
+        0x01                        //Interval
+    }
 };
 
 const unsigned char _string_0[] = { // available languages descriptor
@@ -908,8 +909,9 @@ static void* nuc970_usbip_thread_run(void* opaque)
                 USBIP_RET_SUBMIT usb_req;
                 if ((nb = recv(sockfd, (char*)&cmd, sizeof(USBIP_CMD_SUBMIT), 0)) != sizeof(USBIP_CMD_SUBMIT))
                 {
-                    printf("receive error : %s nb: %d \n", strerror(errno), nb);
+                    printf("receive error : %s, nb: %d \n", strerror(errno), nb);
                     break;
+
                 };
 #ifdef _DEBUG
                 print_recv((char*)&cmd, sizeof(USBIP_CMD_SUBMIT), "USBIP_CMD_SUBMIT");
@@ -1014,7 +1016,7 @@ static uint64_t nuc970_usbd_read(void* opaque, hwaddr offset, unsigned size)
     case 0x08:
         r = s->GINTEN; break;
     case 0x10:
-        r = s->GINTSTS; break;
+        r = s->BUSINTSTS; break;
     case 0x14:
         r = s->BUSINTEN; break;
     case 0x18:
@@ -1088,6 +1090,9 @@ static uint64_t nuc970_usbd_read(void* opaque, hwaddr offset, unsigned size)
             }
         }
         break;
+    case 0x700:
+        r = s->DMAADDR;
+        break;
     default:
         r = 0xffffffff;
         break;
@@ -1110,7 +1115,9 @@ static void nuc970_usbd_write(void* opaque, hwaddr offset, uint64_t value, unsig
         nuc970_usbd_update_interrupt(s);
         break;
     case 0x14:
-        s->BUSINTEN = value; break;
+        s->BUSINTEN = value; 
+        nuc970_usbd_update_interrupt(s);
+        break;
     case 0x18:
         s->OPER = value & ~(1 << 0); break; // RESUMEEN bit is self-clearing
     case 0x1c:
@@ -1159,14 +1166,23 @@ static void nuc970_usbd_write(void* opaque, hwaddr offset, uint64_t value, unsig
     case 0x5c:
         if (value & (1 << 5)) { // DMAEN
             if (value & (1 << 4)) { // DMARD
+                printf("DMARD %d %08x...\n", s->DMACNT, s->DMAADDR);
                 dma_memory_write(&address_space_memory, s->DMAADDR, usbd_buffer,
-                    s->DMACNT, MEMTXATTRS_UNSPECIFIED);                
+                    s->DMACNT, MEMTXATTRS_UNSPECIFIED); 
+                for (int k = 0; k < s->DMACNT; k++)
+                    printf(" \033[0;32m%02x\033[0m", usbd_buffer[k]);
+                printf("\n");
             }
             else {  // DMAWR
+                printf("DMAWR %d %08x...\n", s->DMACNT, s->DMAADDR);
                 dma_memory_read(&address_space_memory, s->DMAADDR, usbd_buffer,
                     s->DMACNT, MEMTXATTRS_UNSPECIFIED);
+                for (int k = 0; k < s->DMACNT; k++)
+                    printf(" \033[0;32m%02x\033[0m", usbd_buffer[k]);
+                printf("\n");
             }
             s->BUSINTSTS |= (1 << USBD_BUSINTEN_DMADONEIEN_Pos);    // DMADONEIF
+            nuc970_usbd_update_interrupt(s);
         }
         if (value & (1 << 7)) {
             s->DMACNT = 0;
@@ -1192,9 +1208,11 @@ static void nuc970_usbd_write(void* opaque, hwaddr offset, uint64_t value, unsig
                 s->EP[epidx].EPINTSTS = value & ~(3);   // [1:0] readonly
                 if (value & 0x1ffc)
                     s->EP[epidx].EPINTSTS &= ~(value & 0x1ffc);
+                nuc970_usbd_update_interrupt(s);
                 break;
             case 2: // INTEN
                 s->EP[epidx].EPINTEN = value;
+                nuc970_usbd_update_interrupt(s);
                 break;
             case 3: // DATCNT
                 s->EP[epidx].EPDATCNT = value;
@@ -1219,6 +1237,9 @@ static void nuc970_usbd_write(void* opaque, hwaddr offset, uint64_t value, unsig
                 break;
             }
         }        
+        break;
+    case 0x700:
+        s->DMAADDR = value;
         break;
          
     default:
@@ -1258,12 +1279,14 @@ static void nuc970_usbd_reset(DeviceState* dev)
     s->EP[0].EPINTEN = USBD_EPINTEN_BUFEMPTYIEN_Msk;
     s->EP[0].EPCFG = 0x00000012;
     s->EP[1].EPINTSTS = 0x00000003;
-    s->EP[1].EPINTEN = 0;
+    s->EP[1].EPINTEN = USBD_EPINTEN_BUFEMPTYIEN_Msk;
     s->EP[1].EPCFG = 0x00000022;
 
     s->usbip_tx_level = 0;
     s->usbip_rx_level = 0;
     qemu_irq_lower(s->irq);
+
+    s->BUSINTSTS |= USBD_BUSINTSTS_RSTIF_Msk;
 }
 
 static void nuc970_usbd_init(Object* obj)
@@ -1323,8 +1346,8 @@ enum {
 static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP_RET_SUBMIT* usb_req)
 {
     printf("Handle packet called: Setup: %llx\n", cmd->setup);
-    
-    USBD_T* s = NUC970_USBD(self);   
+
+    USBD_T* s = NUC970_USBD(self);
     buffer_header_t header;
     char payload[255];
     uint8_t payload_size = 0;
@@ -1352,8 +1375,7 @@ static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USB
     }
     else if (usb_req->ep == 2 || usb_req->direction == 1)
     {
-        // temporarily ignore EP2 interrupts and IN bulk
-        return;
+        //////
     }
     else if (usb_req->ep > 0 && usb_req->actual_length == 0)
     {
@@ -1364,8 +1386,9 @@ static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USB
     {
         printf("UNHANDLED PKTSTS!\n");
     }
+
     if (has_setup)
-    {        
+    {
         s->SETUP1_0 = ntohs((usb_req->setup & 0xFFFF000000000000) >> 48);
         s->SETUP3_2 = ntohs((usb_req->setup & 0x0000FFFF00000000) >> 32);
         s->SETUP5_4 = ntohs((usb_req->setup & 0x00000000FFFF0000) >> 16);
@@ -1376,13 +1399,13 @@ static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USB
         qemu_mutex_unlock_iothread();
     }
 
-    sleep(1);
+    g_usleep(G_USEC_PER_SEC * 0.5);
 
     if (cmd->transfer_buffer_length != 0 && cmd->direction == 0)
     {
         if (usbip_read_payload(&s->usbip_cfg, payload, cmd->transfer_buffer_length))
         {
-            payload_size = cmd->transfer_buffer_length;
+            payload_size = cmd->transfer_buffer_length; 
         }
         else
         {
@@ -1403,7 +1426,7 @@ static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USB
             s->usbip_rx_buffer[word_count - i] = ntohl(setup_words[i]);
         }
         // memcpy(&s->usbip_rx_buffer[1], &usb_req.setup, sizeof(usb_req.setup));
-        s->usbip_rx_level = 1U + word_count;        
+        s->usbip_rx_level = 1U + word_count;
     }
     if (payload_size)
     {
@@ -1415,55 +1438,88 @@ static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USB
         s->usbip_rx_buffer[s->usbip_rx_level++] = header.raw;
         memcpy(&s->usbip_rx_buffer[s->usbip_rx_level], payload, payload_size);
         s->usbip_rx_level += ((payload_size + 3) / 4U);
+
+        memcpy(usbd_buffer, payload, payload_size);
+        for (int j = 0; j < payload_size; j++)
+            printf(" %02x", usbd_buffer[j]);
+        printf("\n");
     }
 
-    if (has_setup) {
-        //if (payload_size)
-        //    s->CEPINTSTS |= USBD_CEPINTSTS_SETUPPKIF_Msk;
-        //else
-        //    s->CEPINTSTS |= USBD_CEPINTSTS_SETUPTKIF_Msk; 
-        
-        //s->CEPINTSTS |= USBD_CEPINTSTS_RXPKIF_Msk;
-        s->CEPINTSTS |= USBD_CEPINTSTS_INTKIF_Msk;
-    }    
     qemu_mutex_unlock(&s->usbip_rx_mtx);
 
-    qemu_mutex_lock_iothread();
-    nuc970_usbd_update_interrupt(s);
-    qemu_mutex_unlock_iothread();
+    if (usb_req->direction) {
+        s->CEPINTSTS |= USBD_CEPINTSTS_INTKIF_Msk;
+        qemu_mutex_lock_iothread();
+        nuc970_usbd_update_interrupt(s);
+        qemu_mutex_unlock_iothread();
 
-    qemu_mutex_lock(&s->usbip_tx_mtx);
-    s->usbip_tx_wlen = cmd->transfer_buffer_length;
-    
-    printf(" wait for reply ready, usbip_tx_wlen: %d\n", s->usbip_tx_wlen);
+        qemu_mutex_lock(&s->usbip_tx_mtx);
+        s->usbip_tx_wlen = cmd->transfer_buffer_length;
+        printf(" wait for reply ready, usbip_tx_wlen: %d\n", s->usbip_tx_wlen);
 
-    // if (reply_required) 
-    // {
+        // if (reply_required) 
+        // {
+        qemu_cond_wait(&s->usip_reply_ready, &s->usbip_tx_mtx);
+        // }
+        printf(" reply ready...\n");
+        //header.raw = s->usbip_tx_buffer[0];
+        usbip_send_reply(&s->usbip_cfg, usb_req, (char*)&s->usbip_tx_buffer[0],
+            //header.DEV.BCNT,
+            s->CEPTXCNT,
+            0);
+        // Wipe data from buffer.
+        s->usbip_tx_level = 0;
+        qemu_mutex_unlock(&s->usbip_tx_mtx);
+
+        s->CEPINTSTS |= USBD_CEPINTSTS_TXPKIF_Msk;
+        qemu_mutex_lock_iothread();
+        nuc970_usbd_update_interrupt(s);
+        qemu_mutex_unlock_iothread();
+        usleep(500);
+    }
+    else {  // usb_req->direction == 0
+        if (usb_req->ep) {
+            s->EP[usb_req->ep - 1].EPINTSTS |= USBD_EPINTSTS_RXPKIF_Msk;            
+            s->EP[usb_req->ep - 1].EPDATCNT = cmd->transfer_buffer_length;
+
+            qemu_mutex_lock_iothread();
+            nuc970_usbd_update_interrupt(s);
+            qemu_mutex_unlock_iothread();
+
+            qemu_mutex_lock(&s->usbip_tx_mtx);
+            s->usbip_tx_wlen = cmd->transfer_buffer_length;
+            printf(" wait for reply ready, usbip_tx_wlen: %d\n", s->usbip_tx_wlen);
+
+            // if (reply_required) 
+            // {
             qemu_cond_wait(&s->usip_reply_ready, &s->usbip_tx_mtx);
-    // }
-    printf(" reply ready...\n");
-    //header.raw = s->usbip_tx_buffer[0];
-    usbip_send_reply(&s->usbip_cfg, usb_req, (char*)&s->usbip_tx_buffer[0], 
-        //header.DEV.BCNT,
-        s->CEPTXCNT,
-        0);
-    // Wipe data from buffer.
-    s->usbip_tx_level = 0;
-    qemu_mutex_unlock(&s->usbip_tx_mtx);
+            // }
+            printf(" reply ready...\n");
+            //header.raw = s->usbip_tx_buffer[0];
+            usbip_send_reply(&s->usbip_cfg, usb_req, usbd_buffer,
+                s->EP[usb_req->ep - 1].EPDATCNT, 0);
+            qemu_mutex_unlock(&s->usbip_tx_mtx);
 
-    s->CEPINTSTS |= USBD_CEPINTSTS_TXPKIF_Msk;
-    qemu_mutex_lock_iothread();
-    nuc970_usbd_update_interrupt(s);
-    qemu_mutex_unlock_iothread();
-
-    sleep(1);
+            s->EP[usb_req->ep - 1].EPINTSTS |= USBD_EPINTSTS_TXPKIF_Msk;
+            qemu_mutex_lock_iothread();
+            nuc970_usbd_update_interrupt(s);
+            qemu_mutex_unlock_iothread();
+            usleep(500);
+        }
+        else {
+            usbip_send_reply(&s->usbip_cfg, usb_req, NULL, 0, 0);
+            // Wipe data from buffer.
+            s->EP[0].EPINTSTS |= USBD_EPINTSTS_BUFEMPTYIF_Msk;
+            s->usbip_tx_level = 0;
+        }
+    }    
 
     s->CEPINTSTS |= USBD_CEPINTSTS_STSDONEIF_Msk;
     qemu_mutex_lock_iothread();
     nuc970_usbd_update_interrupt(s);
     qemu_mutex_unlock_iothread();
 
-    sleep(1);
+    usleep(500);
 
 }
 
