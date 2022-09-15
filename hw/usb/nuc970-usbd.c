@@ -1540,11 +1540,33 @@ static void nuc970_usbip_handle_control(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, US
         // {
         qemu_cond_wait(&s->usip_reply_ready, &s->usbip_tx_mtx);
         // }
-        printf(" reply ready...\n");
+        if (cmd->transfer_buffer_length > 0x40 && 
+            cmd->transfer_buffer_length != 0xff) {
+            printf(" reply ready 1...\n");
+            
+            g_usleep(3000);
+
+            while (s->usbip_tx_level < cmd->transfer_buffer_length) {
+                s->CEPINTSTS |= USBD_CEPINTSTS_TXPKIF_Msk;
+                qemu_mutex_lock_iothread();
+                nuc970_usbd_update_interrupt(s);
+                qemu_mutex_unlock_iothread();
+
+                g_usleep(3000);
+
+                s->CEPINTSTS |= USBD_CEPINTSTS_INTKIF_Msk;
+                qemu_mutex_lock_iothread();
+                nuc970_usbd_update_interrupt(s);
+                qemu_mutex_unlock_iothread();
+
+                qemu_cond_wait(&s->usip_reply_ready, &s->usbip_tx_mtx);
+            }
+        }
+        printf(" reply ready 2...\n");
         //header.raw = s->usbip_tx_buffer[0];
         usbip_send_reply(&s->usbip_cfg, usb_req, (char*)&s->usbip_tx_buffer[0],
             //header.DEV.BCNT,
-            s->CEPTXCNT,
+            s->usbip_tx_level,
             0);
         // Wipe data from buffer.
         s->usbip_tx_level = 0;
