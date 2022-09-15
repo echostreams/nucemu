@@ -304,7 +304,6 @@ extern void usbip_send_reply(usbip_cfg_t* cfg, USBIP_RET_SUBMIT* usb_req, const 
                 printf("\n");
         }
         printf("\n\033[0m");
-
     }
 }
 
