@@ -299,7 +299,7 @@ extern void usbip_send_reply(usbip_cfg_t* cfg, USBIP_RET_SUBMIT* usb_req, const 
         };
         printf("\033[0;32m");
         for (int i = 0; i < size; i++) {
-            printf(" %02x", data[i]);
+            printf(" %02x", ((unsigned char*)data)[i]);
             if ((i + 1) % 16 == 0)
                 printf("\n");
         }
@@ -460,6 +460,7 @@ void* usbip_thread_run(void* run_info)
                 printf("usbip interval %u\n", cmd.interval);
                 //  printf("usbip setup %"PRI"\n",cmd.setup);
                 printf("usbip buffer lenght  %u\n", cmd.transfer_buffer_length);
+                printf("usbip start frame %u\n", cmd.start_frame);
                 usb_req.command = 0;
                 usb_req.seqnum = cmd.seqnum;
                 usb_req.devid = cmd.devid;
