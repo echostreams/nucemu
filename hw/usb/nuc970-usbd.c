@@ -284,6 +284,22 @@ const USB_INTERFACE_DESCRIPTOR* _interfaces[] = { &configuration_msc.dev_int0 };
 
 const unsigned char* _strings[] = { _string_0, _string_1, _string_2 };
 
+static void set_rx_level(USBD_T* usbd, uint32_t level)
+{
+    qemu_mutex_lock(&usbd->usbip_rx_mtx);
+    usbd->usbip_rx_level = level;
+    qemu_mutex_unlock(&usbd->usbip_rx_mtx);
+}
+
+static uint32_t get_rx_level(USBD_T* usbd)
+{
+    uint32_t ret;
+    qemu_mutex_lock(&usbd->usbip_rx_mtx);
+    ret = usbd->usbip_rx_level;
+    qemu_mutex_unlock(&usbd->usbip_rx_mtx);
+    return ret;
+}
+
 void handle_device_list(const USB_DEVICE_DESCRIPTOR* dev_dsc, OP_REP_DEVLIST* list)
 {
     CONFIG_GEN* conf = (CONFIG_GEN*)_configuration;
@@ -686,7 +702,6 @@ typedef struct usb_cmd
 
 void handle_unknown_control(int sockfd, StandardDeviceRequest* control_req, USBIP_RET_SUBMIT* usb_req, USBD_T* usbd)
 {
-
     printf(">> Control Type: %d, %d\n", control_req->bmRequestType, control_req->bRequest);
     // vendor command
     USB_CMD_T _usb_cmd_pkt;
@@ -1314,12 +1329,19 @@ static void nuc970_usbd_write(void* opaque, hwaddr offset, uint64_t value, unsig
                 s->EP[0].EPINTSTS &= ~(USBD_EPINTSTS_BUFEMPTYIF_Msk); // not empty
             }
             else {  // DMA write (read from USB buffer)
+                
                 printf("DMAWR %d %08x, EP: %d...\n", s->DMACNT, s->DMAADDR, s->DMACTL & 0xf);
+                
+                while (!get_rx_level(s)) {  // wait for rx buffer ready
+                    g_usleep(500);
+                }
+                
                 dma_memory_write(&address_space_memory, s->DMAADDR, s->usbip_rx_buffer,
                     s->DMACNT, MEMTXATTRS_UNSPECIFIED);
                 for (int k = 0; k < s->DMACNT; k++)
                     printf(" \033[0;33m%02x\033[0m", s->usbip_rx_buffer[k]);
-                printf("\n");                
+                printf("\n");
+                set_rx_level(s, 0); // empty rx buffer
                 
             }
             s->BUSINTSTS |= (1 << USBD_BUSINTEN_DMADONEIEN_Pos);    // DMADONEIF
@@ -1425,6 +1447,7 @@ static void nuc970_usbd_reset(DeviceState* dev)
 
     s->usbip_cep_level = 0;
     s->usbip_rx_level = 0;
+    s->usbip_tx_level = 0;
     qemu_irq_lower(s->irq);
 
     s->BUSINTSTS |= USBD_BUSINTSTS_RSTIF_Msk;
@@ -1657,7 +1680,11 @@ static void nuc970_usbip_handle_data(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP
         {
             for (int j = 0; j < cmd->transfer_buffer_length; j++)
                 printf(" %02x", (unsigned char)s->usbip_rx_buffer[j]);
-            printf("\n");            
+            printf("\n");
+
+            qemu_mutex_lock(&s->usbip_rx_mtx);
+            s->usbip_rx_level = cmd->transfer_buffer_length;
+            qemu_mutex_unlock(&s->usbip_rx_mtx);
 
             qemu_mutex_lock(&s->usbip_tx_mtx);
 
@@ -1689,7 +1716,7 @@ static void nuc970_usbip_handle_data(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP
             qemu_mutex_lock_iothread();
             nuc970_usbd_update_interrupt(s);
             qemu_mutex_unlock_iothread();
-            g_usleep(G_USEC_PER_SEC * 0.1);
+            g_usleep(G_USEC_PER_SEC * 0.05);
             
             //s->EP[usb_req->ep - 1].EPINTSTS |= USBD_EPINTSTS_TXPKIF_Msk;
             //qemu_mutex_lock_iothread();
