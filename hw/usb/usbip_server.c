@@ -290,7 +290,7 @@ extern void usbip_send_reply(usbip_cfg_t* cfg, USBIP_RET_SUBMIT* usb_req, const 
         exit(-1);
     };
 
-    if (size > 0)
+    if (size > 0 && data)
     {
         if (send(cfg->_private_fd, data, size, 0) != size)
         {
