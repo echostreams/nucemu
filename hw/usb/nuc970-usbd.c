@@ -1374,9 +1374,13 @@ static void nuc970_usbd_write(void* opaque, hwaddr offset, uint64_t value, unsig
                     s->EP[epidx].ep.EPDAT = value;
                 else
                     s->EP[epidx].ep.EPDAT_BYTE = value & 0xff;
+
                 if ((s->EP[epidx].EPCFG >> 3) & 0x01)   // IN (Host IN from Device)
                 {
+                    qemu_mutex_lock(&s->usbip_tx_mtx);
                     s->usbip_tx_buffer[s->usbip_tx_level++] = s->EP[epidx].ep.EPDAT_BYTE;
+                    //s->EP[0].EPINTSTS &= ~(USBD_EPINTSTS_BUFEMPTYIF_Msk); // not empty
+                    qemu_mutex_unlock(&s->usbip_tx_mtx);
                 }
                 else // OUT (Host OUT to Device)
                 {
@@ -1385,8 +1389,9 @@ static void nuc970_usbd_write(void* opaque, hwaddr offset, uint64_t value, unsig
                 break;
             case 1: // INTSTS
                 s->EP[epidx].EPINTSTS = value & ~(3);   // [1:0] readonly
-                if (value & 0x1ffc)
+                if (value & 0x1ffc) {
                     s->EP[epidx].EPINTSTS &= ~(value & 0x1ffc);
+                }
                 nuc970_usbd_update_interrupt(s);
                 break;
             case 2: // INTEN
@@ -1771,15 +1776,19 @@ static void nuc970_usbip_handle_data(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP
             // {
             //qemu_cond_wait(&s->usip_reply_ready, &s->usbip_tx_mtx);
             // }
-            printf(" reply %d...\n", cmd->transfer_buffer_length);
+            printf(" reply %d, buffer size: %d...\n", cmd->transfer_buffer_length,
+                    s->usbip_tx_level
+                );
 
-            usbip_send_reply(&s->usbip_cfg, usb_req, s->usbip_tx_buffer, cmd->transfer_buffer_length, 0);
+            usbip_send_reply(&s->usbip_cfg, usb_req, s->usbip_tx_buffer, 
+                cmd->transfer_buffer_length,
+                0);
             s->usbip_tx_level = 0;
             qemu_mutex_unlock(&s->usbip_tx_mtx);
 
             s->EP[0].EPINTSTS |= USBD_EPINTSTS_BUFEMPTYIF_Msk;
 
-            s->EP[ep - 1].EPINTSTS |= USBD_EPINTSTS_SHORTTXIF_Msk;
+            //s->EP[ep - 1].EPINTSTS |= USBD_EPINTSTS_SHORTTXIF_Msk;
             s->EP[ep - 1].EPINTSTS |= USBD_EPINTSTS_TXPKIF_Msk;
             qemu_mutex_lock_iothread();
             nuc970_usbd_update_interrupt(s);
