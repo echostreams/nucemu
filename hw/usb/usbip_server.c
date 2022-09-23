@@ -271,6 +271,7 @@ extern bool usbip_read_payload(usbip_cfg_t* cfg, char* buffer, unsigned int size
 
 extern void usbip_send_reply(usbip_cfg_t* cfg, USBIP_RET_SUBMIT* usb_req, const char* data, unsigned int size, unsigned int status)
 {
+    printf(" sending reply size: %d, status: %d, data: %p\n", size, status, data);
     usb_req->command = 0x3;
     usb_req->status = status;
     usb_req->actual_length = size;

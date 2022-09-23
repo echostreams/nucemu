@@ -371,7 +371,7 @@ static void usbd_handle_attach(const USB_DEVICE_DESCRIPTOR* _dev_dsc, OP_REP_IMP
         qemu_mutex_unlock_iothread();
     }
 
-    g_usleep(G_USEC_PER_SEC * 0.5);
+    g_usleep(G_USEC_PER_SEC * 0.1);
     
     s->CEPINTSTS |= USBD_CEPINTSTS_INTKIF_Msk;
     qemu_mutex_lock_iothread();
@@ -429,7 +429,7 @@ static void usbd_handle_attach(const USB_DEVICE_DESCRIPTOR* _dev_dsc, OP_REP_IMP
         qemu_mutex_unlock_iothread();
     }
 
-    g_usleep(G_USEC_PER_SEC * 0.5);
+    g_usleep(G_USEC_PER_SEC * 0.1);
 
     s->CEPINTSTS |= USBD_CEPINTSTS_INTKIF_Msk;
     qemu_mutex_lock_iothread();
@@ -1132,7 +1132,6 @@ static void* nuc970_usbip_thread_run(void* opaque)
 
                 if (cmd.command == 1)
                 {
-                    printf("usb_req ep %d\n", usb_req.ep);
                     USBIPServerClass* s = USBIP_SERVER_GET_CLASS(cfg->self);
                     s->usbip_handle_packet(cfg->self, &cmd, &usb_req);
                     //handle_usb_request(sockfd, &usb_req, cmd.transfer_buffer_length, usbd);
@@ -1401,9 +1400,10 @@ static void nuc970_usbd_write(void* opaque, hwaddr offset, uint64_t value, unsig
                 printf("DMAWR %d %08x, EP: %d...\n", s->DMACNT, s->DMAADDR, s->DMACTL & 0xf);
                 
                 while (!get_rx_level(s)) {  // wait for rx buffer ready
+                    printf(".");
                     g_usleep(500);
                 }
-                
+                printf("\n");
                 dma_memory_write(&address_space_memory, s->DMAADDR, s->usbip_rx_buffer,
                     s->DMACNT, MEMTXATTRS_UNSPECIFIED);
                 for (int k = 0; k < s->DMACNT; k++)
@@ -1598,8 +1598,6 @@ enum {
 
 static void nuc970_usbip_handle_control(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP_RET_SUBMIT* usb_req)
 {
-    printf("Handle control packet: Setup: %llx\n", cmd->setup);
-
     USBD_T* s = NUC970_USBD(self);
     unsigned char payload[512];
     uint8_t payload_size = 0;
@@ -1644,10 +1642,9 @@ static void nuc970_usbip_handle_control(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, US
     */
     g_usleep(G_USEC_PER_SEC * 0.1);
    
-    printf(" >>>> setup %d >>>>>>> \n", has_setup);
+    printf(" >>>>>> setup %d >>>>>> \n", has_setup);
     
-    qemu_mutex_lock(&s->usbip_rx_mtx);
-    printf(" ==== payload %d ===== \n", payload_size);
+    printf(" ==== payload %d ==== \n", payload_size);
 
     if (payload_size)
     {
@@ -1655,7 +1652,6 @@ static void nuc970_usbip_handle_control(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, US
             printf(" %02x", payload[j]);
         printf("\n");
     }
-    qemu_mutex_unlock(&s->usbip_rx_mtx);
 
     if (usb_req->direction) {
         s->CEPINTSTS |= USBD_CEPINTSTS_INTKIF_Msk;
@@ -1838,7 +1834,7 @@ static void nuc970_usbip_handle_data(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP
             nuc970_usbd_update_interrupt(s);
             qemu_mutex_unlock_iothread();
 
-            g_usleep(G_USEC_PER_SEC * 0.5);
+            g_usleep(G_USEC_PER_SEC * 0.1);
 
             if (cmd->transfer_buffer_length <= 4096) {
                 qemu_mutex_lock(&s->usbip_tx_mtx);
@@ -1857,12 +1853,16 @@ static void nuc970_usbip_handle_data(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP
                     memcpy(buf + (i * 4096), s->usbip_tx_buffer, 4096);
                     set_tx_level(s, 0); // tigger client to write again.
                     s->EP[0].EPINTSTS |= USBD_EPINTSTS_BUFEMPTYIF_Msk;  // empty
-                    printf(">>>>>>\n");
                     while (!get_tx_level(s)) {
                         g_usleep(500);
                     }
                     printf(" bulk in loop %d...\n", i);
                 }
+                if (cmd->transfer_buffer_length % 4096) {
+                    memcpy(buf + (i * 4096), s->usbip_tx_buffer, cmd->transfer_buffer_length % 4096);
+                    set_tx_level(s, 0);
+                }
+
                 usbip_send_reply(&s->usbip_cfg, usb_req, buf, cmd->transfer_buffer_length, 0);
                 
                 free(buf);
@@ -1889,7 +1889,7 @@ static void nuc970_usbip_handle_data(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP
 
 static void nuc970_usbip_handle_packet(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP_RET_SUBMIT* usb_req)
 {
-    printf("Handle packet called: Setup: %llx, ep: %d, dir: %d\n", cmd->setup, cmd->ep, cmd->direction);
+    printf("Handle packet: Setup: %llx, ep: %d, dir: %d\n", cmd->setup, cmd->ep, cmd->direction);
 
     if (cmd->ep == 0) {
         nuc970_usbip_handle_control(self, cmd, usb_req);
