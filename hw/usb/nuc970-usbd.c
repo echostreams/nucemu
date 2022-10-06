@@ -904,11 +904,12 @@ void handle_usb_request(int sockfd, USBIP_RET_SUBMIT* ret, int bl, USBD_T* usbd)
 
 static void nuc970_usbd_update_interrupt(USBD_T* usbd)
 {
+    /*
     printf(" BUSINT %08x %08x\n", usbd->BUSINTSTS, usbd->BUSINTEN);
     printf(" CEPINT %08x %08x\n", usbd->CEPINTSTS, usbd->CEPINTEN);
     printf(" EPAINT %08x %08x\n", usbd->EP[0].EPINTSTS, usbd->EP[0].EPINTEN);
     printf(" EPBINT %08x %08x\n", usbd->EP[1].EPINTSTS, usbd->EP[1].EPINTEN);
-
+    */
     if (usbd->BUSINTSTS & usbd->BUSINTEN ||
         usbd->CEPINTSTS & usbd->CEPINTEN ||
         usbd->EP[0].EPINTSTS & usbd->EP[0].EPINTEN ||
@@ -1116,7 +1117,7 @@ static void* nuc970_usbip_thread_run(void* opaque)
                 printf("usbip number of packets %u\n", cmd.number_of_packets);
                 printf("usbip interval %u\n", cmd.interval);
                 //  printf("usbip setup %"PRI"\n",cmd.setup);
-                printf("usbip buffer lenght  %u\n", cmd.transfer_buffer_length);
+                printf("usbip buffer length  %u\n", cmd.transfer_buffer_length);
                 printf("usbip start frame %u\n", cmd.start_frame);
                 usb_req.command = 0;
                 usb_req.seqnum = cmd.seqnum;
@@ -1763,10 +1764,8 @@ static void nuc970_usbip_handle_data(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP
         int i; 
         for (i = 0; i < chunk_cnt; i++) 
         {
-
             if (usbip_read_payload(&s->usbip_cfg, s->usbip_rx_buffer, chunk_size))
             {
-                printf(" Host OUT: \n");
                 for (int j = 0; j < chunk_size; j++)
                     printf(" %02x", (unsigned char)s->usbip_rx_buffer[j]);
                 printf("\n");
@@ -1834,7 +1833,7 @@ static void nuc970_usbip_handle_data(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP
             nuc970_usbd_update_interrupt(s);
             qemu_mutex_unlock_iothread();
 
-            g_usleep(G_USEC_PER_SEC * 0.1);
+            g_usleep(G_USEC_PER_SEC * 0.05);
 
             if (cmd->transfer_buffer_length <= 4096) {
                 qemu_mutex_lock(&s->usbip_tx_mtx);
@@ -1876,7 +1875,7 @@ static void nuc970_usbip_handle_data(USBIPIF* self, USBIP_CMD_SUBMIT* cmd, USBIP
             nuc970_usbd_update_interrupt(s);
             qemu_mutex_unlock_iothread();
 
-            g_usleep(G_USEC_PER_SEC * 0.1);
+            g_usleep(G_USEC_PER_SEC * 0.05);
         }
     }
 

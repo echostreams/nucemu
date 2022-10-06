@@ -271,7 +271,7 @@ extern bool usbip_read_payload(usbip_cfg_t* cfg, char* buffer, unsigned int size
 
 extern void usbip_send_reply(usbip_cfg_t* cfg, USBIP_RET_SUBMIT* usb_req, const char* data, unsigned int size, unsigned int status)
 {
-    printf(" sending reply size: %d, status: %d, data: %p\n", size, status, data);
+    printf(" sending reply size: %d, status: %d\n", size, status);
     usb_req->command = 0x3;
     usb_req->status = status;
     usb_req->actual_length = size;
@@ -350,13 +350,13 @@ void* usbip_thread_run(void* run_info)
 
     if (bind(listenfd, (sockaddr*)&serv, sizeof(serv)) < 0)
     {
-        printf("bind error : %s \n", strerror(errno));
+        printf("usbip bind error : %s \n", strerror(errno));
         exit(1);
     };
 
     if (listen(listenfd, SOMAXCONN) < 0)
     {
-        printf("listen error : %s \n", strerror(errno));
+        printf("usbip listen error : %s \n", strerror(errno));
         exit(1);
     };
 
@@ -460,7 +460,7 @@ void* usbip_thread_run(void* run_info)
                 printf("usbip number of packets %u\n", cmd.number_of_packets);
                 printf("usbip interval %u\n", cmd.interval);
                 //  printf("usbip setup %"PRI"\n",cmd.setup);
-                printf("usbip buffer lenght  %u\n", cmd.transfer_buffer_length);
+                printf("usbip buffer length %u\n", cmd.transfer_buffer_length);
                 printf("usbip start frame %u\n", cmd.start_frame);
                 usb_req.command = 0;
                 usb_req.seqnum = cmd.seqnum;

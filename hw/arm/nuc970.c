@@ -1566,7 +1566,7 @@ static uint64_t nuc970_gpio_read(void* opaque, hwaddr offset,
         r = s->regs[offset / 4];
         break;
     }
-    fprintf(stderr, "gpio read %08lx = %08x\n", offset, r);
+    fprintf(stderr, "gpio read  %08lx = %08x\n", offset, r);
     return r;
 }
 
@@ -1972,12 +1972,12 @@ static const TypeInfo nuc970_rtc_info = {
  // define the total padding bytes for 512/1024 data segment
 #define BCH_PADDING_LEN_512     32
 #define BCH_PADDING_LEN_1024    64
-// define the BCH parity code lenght for 512 bytes data pattern
+// define the BCH parity code length for 512 bytes data pattern
 #define BCH_PARITY_LEN_T4  8
 #define BCH_PARITY_LEN_T8  15
 #define BCH_PARITY_LEN_T12 23
 #define BCH_PARITY_LEN_T15 29
-// define the BCH parity code lenght for 1024 bytes data pattern
+// define the BCH parity code length for 1024 bytes data pattern
 #define BCH_PARITY_LEN_T24 45
 
 #define BCH_T15   0x00400000
@@ -2388,7 +2388,7 @@ static uint64_t nuc970_fmi_read(void* opaque, hwaddr offset,
         break;
     }
 
-    //fprintf(stderr, "fmi_read (offset=%lx, value=%08x)\n", offset, r);
+    //fprintf(stderr, "fmi_read (offset=%lx, value=%08x, size=%d)\n", offset, r, size);
     return r;
 }
 
