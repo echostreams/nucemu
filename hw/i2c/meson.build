@@ -9,6 +9,7 @@ i2c_ss.add(when: 'CONFIG_EXYNOS4', if_true: files('exynos4210_i2c.c'))
 i2c_ss.add(when: 'CONFIG_IMX_I2C', if_true: files('imx_i2c.c'))
 
 i2c_ss.add(when: 'CONFIG_NUC970', if_true: files('nuc970_i2c.c'))
+i2c_ss.add(when: 'CONFIG_NUC980', if_true: files('nuc980_i2c.c'))
 
 i2c_ss.add(when: 'CONFIG_MPC_I2C', if_true: files('mpc_i2c.c'))
 i2c_ss.add(when: 'CONFIG_NRF51_SOC', if_true: files('microbit_i2c.c'))

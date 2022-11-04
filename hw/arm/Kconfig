@@ -568,3 +568,7 @@ config ARMSSE
 config NUC970
     bool
     imply I2C_DEVICES
+
+config NUC980
+    bool
+    imply I2C_DEVICES

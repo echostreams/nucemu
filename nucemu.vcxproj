@@ -93,10 +93,12 @@
   </PropertyGroup>
   <ItemGroup>
     <ClCompile Include="hw\arm\nuc970.c" />
+    <ClCompile Include="hw\arm\nuc980.c" />
     <ClCompile Include="hw\block\m25p80.c" />
     <ClCompile Include="hw\block\nand.c" />
     <ClCompile Include="hw\char\nuc970_uart.c" />
     <ClCompile Include="hw\i2c\nuc970_i2c.c" />
+    <ClCompile Include="hw\i2c\nuc980_i2c.c" />
     <ClCompile Include="hw\intc\nuc970_aic.c" />
     <ClCompile Include="hw\misc\nuc970_rng.c" />
     <ClCompile Include="hw\net\nuc970_emc.c" />
@@ -114,8 +116,10 @@
     <ClInclude Include="hw\usb\usbip.h" />
     <ClInclude Include="hw\usb\usbip_server.h" />
     <ClInclude Include="include\hw\arm\nuc970.h" />
+    <ClInclude Include="include\hw\arm\nuc980.h" />
     <ClInclude Include="include\hw\char\nuc970_uart.h" />
     <ClInclude Include="include\hw\i2c\nuc970_i2c.h" />
+    <ClInclude Include="include\hw\i2c\nuc980_i2c.h" />
     <ClInclude Include="include\hw\intc\nuc970_aic.h" />
     <ClInclude Include="include\hw\net\nuc970_emc.h" />
     <ClInclude Include="include\hw\timer\nuc970_timer.h" />
