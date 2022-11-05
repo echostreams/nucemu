@@ -6,6 +6,7 @@
 
 #include "hw/sysbus.h"
 #include "qom/object.h"
+#include "qemu/timer.h"
 
 #define TYPE_NUC980_I2C "nuc980.i2c"
 OBJECT_DECLARE_SIMPLE_TYPE(NUC980I2CState, NUC980_I2C)
@@ -14,7 +15,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(NUC980I2CState, NUC980_I2C)
 
 /* NUC980 I2C memory map */
 /*
-    i2c register offset
+	i2c register offset
 */
 #define     I2C_CTL0	    (0x00)
 #define     I2C_ADDR0	    (0x04)
@@ -34,6 +35,14 @@ OBJECT_DECLARE_SIMPLE_TYPE(NUC980I2CState, NUC980_I2C)
 #define     I2C_CTL1        (0x44)
 #define     I2C_STATUS1     (0x48)
 #define     I2C_TMCTL       (0x4c)
+
+#define I2C_BUSCTL      0x50
+#define I2C_BUSTCTL     0x54
+#define I2C_BUSSTS      0x58
+#define I2C_PKTSIZE     0x5C
+#define I2C_PKTCRC      0x60
+#define I2C_BUSTOUT     0x64
+#define I2C_CLKTOUT     0x68
 
 /*---------------------------------------------------------------------------------------------------------*/
 /*  I2C_CTL constant definitions.                                                                            */
@@ -271,41 +280,45 @@ OBJECT_DECLARE_SIMPLE_TYPE(NUC980I2CState, NUC980_I2C)
 #define I2C_CLKTOUT_CLKTO_Msk            (0xfful << I2C_CLKTOUT_CLKTO_Pos)                 /*!< I2C_T::CLKTOUT: CLKTO Mask             */
 
 struct NUC980I2CState {
-    /*< private >*/
-    SysBusDevice parent_obj;
+	/*< private >*/
+	SysBusDevice parent_obj;
 
-    /*< public >*/
-    MemoryRegion iomem;
-    I2CBus* bus;
-    qemu_irq irq;
+	/*< public >*/
+	MemoryRegion iomem;
+	I2CBus* bus;
+	qemu_irq irq;
 
-    uint32_t CTL0;                  /*!< [0x0000] I2C Control Register 0                                           */
-    uint32_t ADDR0;                 /*!< [0x0004] I2C Slave Address Register0                                      */
-    uint32_t DAT;                   /*!< [0x0008] I2C Data Register                                                */
-    uint32_t STATUS0;               /*!< [0x000c] I2C Status Register 0                                            */
-    uint32_t CLKDIV;                /*!< [0x0010] I2C Clock Divided Register                                       */
-    uint32_t TOCTL;                 /*!< [0x0014] I2C Time-out Control Register                                    */
-    uint32_t ADDR1;                 /*!< [0x0018] I2C Slave Address Register1                                      */
-    uint32_t ADDR2;                 /*!< [0x001c] I2C Slave Address Register2                                      */
-    uint32_t ADDR3;                 /*!< [0x0020] I2C Slave Address Register3                                      */
-    uint32_t ADDRMSK0;              /*!< [0x0024] I2C Slave Address Mask Register0                                 */
-    uint32_t ADDRMSK1;              /*!< [0x0028] I2C Slave Address Mask Register1                                 */
-    uint32_t ADDRMSK2;              /*!< [0x002c] I2C Slave Address Mask Register2                                 */
-    uint32_t ADDRMSK3;              /*!< [0x0030] I2C Slave Address Mask Register3                                 */
-    //uint32_t RESERVE0[2];
-    uint32_t WKCTL;                 /*!< [0x003c] I2C Wake-up Control Register                                     */
-    uint32_t WKSTS;                 /*!< [0x0040] I2C Wake-up Status Register                                      */
-    uint32_t CTL1;                  /*!< [0x0044] I2C Control Register 1                                           */
-    uint32_t STATUS1;               /*!< [0x0048] I2C Status Register 1                                            */
-    uint32_t TMCTL;                 /*!< [0x004c] I2C Timing Configure Control Register                            */
-    uint32_t BUSCTL;                /*!< [0x0050] I2C Bus Management Control Register                              */
-    uint32_t BUSTCTL;               /*!< [0x0054] I2C Bus Management Timer Control Register                        */
-    uint32_t BUSSTS;                /*!< [0x0058] I2C Bus Management Status Register                               */
-    uint32_t PKTSIZE;               /*!< [0x005c] I2C Packet Error Checking Byte Number Register                   */
-    uint32_t PKTCRC;                /*!< [0x0060] I2C Packet Error Checking Byte Value Register                    */
-    uint32_t BUSTOUT;               /*!< [0x0064] I2C Bus Management Timer Register                                */
-    uint32_t CLKTOUT;               /*!< [0x0068] I2C Bus Management Clock Low Timer Register                      */
+	uint32_t CTL0;                  /*!< [0x0000] I2C Control Register 0                                           */
+	uint32_t ADDR0;                 /*!< [0x0004] I2C Slave Address Register0                                      */
+	uint32_t DAT;                   /*!< [0x0008] I2C Data Register                                                */
+	uint32_t STATUS0;               /*!< [0x000c] I2C Status Register 0                                            */
+	uint32_t CLKDIV;                /*!< [0x0010] I2C Clock Divided Register                                       */
+	uint32_t TOCTL;                 /*!< [0x0014] I2C Time-out Control Register                                    */
+	uint32_t ADDR1;                 /*!< [0x0018] I2C Slave Address Register1                                      */
+	uint32_t ADDR2;                 /*!< [0x001c] I2C Slave Address Register2                                      */
+	uint32_t ADDR3;                 /*!< [0x0020] I2C Slave Address Register3                                      */
+	uint32_t ADDRMSK0;              /*!< [0x0024] I2C Slave Address Mask Register0                                 */
+	uint32_t ADDRMSK1;              /*!< [0x0028] I2C Slave Address Mask Register1                                 */
+	uint32_t ADDRMSK2;              /*!< [0x002c] I2C Slave Address Mask Register2                                 */
+	uint32_t ADDRMSK3;              /*!< [0x0030] I2C Slave Address Mask Register3                                 */
+	//uint32_t RESERVE0[2];
+	uint32_t WKCTL;                 /*!< [0x003c] I2C Wake-up Control Register                                     */
+	uint32_t WKSTS;                 /*!< [0x0040] I2C Wake-up Status Register                                      */
+	uint32_t CTL1;                  /*!< [0x0044] I2C Control Register 1                                           */
+	uint32_t STATUS1;               /*!< [0x0048] I2C Status Register 1                                            */
+	uint32_t TMCTL;                 /*!< [0x004c] I2C Timing Configure Control Register                            */
+	uint32_t BUSCTL;                /*!< [0x0050] I2C Bus Management Control Register                              */
+	uint32_t BUSTCTL;               /*!< [0x0054] I2C Bus Management Timer Control Register                        */
+	uint32_t BUSSTS;                /*!< [0x0058] I2C Bus Management Status Register                               */
+	uint32_t PKTSIZE;               /*!< [0x005c] I2C Packet Error Checking Byte Number Register                   */
+	uint32_t PKTCRC;                /*!< [0x0060] I2C Packet Error Checking Byte Value Register                    */
+	uint32_t BUSTOUT;               /*!< [0x0064] I2C Bus Management Timer Register                                */
+	uint32_t CLKTOUT;               /*!< [0x0068] I2C Bus Management Clock Low Timer Register*/
 
+	bool is_recv;
+	bool ack;
+	QEMUTimer* dat_timer;
+	int64_t dat_time;
 };
 
 /** @addtogroup I2C_EXPORTED_FUNCTIONS I2C Exported Functions
@@ -324,166 +337,202 @@ struct NUC980I2CState {
  */
 #define I2C_SET_CONTROL_REG(i2c, u8Ctrl) ((i2c)->CTL0 = ((i2c)->CTL0 & ~0x3c) | (u8Ctrl))
 
- /**
-  *    @brief        The macro is used to set START condition of I2C Bus
-  *
-  *    @param[in]    i2c        Specify I2C port
-  *
-  *    @return       None
-  *
-  *    @details      Set the I2C bus START condition in I2C_CTL register.
-  *    \hideinitializer
-  */
+/**
+*    @brief        The macro is used to set START condition of I2C Bus
+*
+*    @param[in]    i2c        Specify I2C port
+*
+*    @return       None
+*
+*    @details      Set the I2C bus START condition in I2C_CTL register.
+*    \hideinitializer
+*/
 #define I2C_START(i2c)  ((i2c)->CTL0 = ((i2c)->CTL0 & ~I2C_CTL0_SI_Msk) | I2C_CTL0_STA_Msk)
 
-  /**
-   *    @brief        The macro is used to wait I2C bus status get ready
-   *
-   *    @param[in]    i2c        Specify I2C port
-   *
-   *    @return       None
-   *
-   *    @details      When a new status is presented of I2C bus, the SI flag will be set in I2C_CTL register.
-   *    \hideinitializer
-   */
+/**
+*    @brief        The macro is used to wait I2C bus status get ready
+*
+*    @param[in]    i2c        Specify I2C port
+*
+*    @return       None
+*
+*    @details      When a new status is presented of I2C bus, the SI flag will be set in I2C_CTL register.
+*    \hideinitializer
+*/
 #define I2C_WAIT_READY(i2c)     while(!((i2c)->CTL0 & I2C_CTL0_SI_Msk))
 
-   /**
-    *    @brief        The macro is used to Read I2C Bus Data Register
-    *
-    *    @param[in]    i2c        Specify I2C port
-    *
-    *    @return       A byte of I2C data register
-    *
-    *    @details      I2C controller read data from bus and save it in I2CDAT register.
-    *    \hideinitializer
-    */
+/**
+*    @brief        The macro is used to Read I2C Bus Data Register
+*
+*    @param[in]    i2c        Specify I2C port
+*
+*    @return       A byte of I2C data register
+*
+*    @details      I2C controller read data from bus and save it in I2CDAT register.
+*    \hideinitializer
+*/
 #define I2C_GET_DATA(i2c)   ((i2c)->DAT)
 
-    /**
-     *    @brief        Write a Data to I2C Data Register
-     *
-     *    @param[in]    i2c         Specify I2C port
-     *    @param[in]    u8Data      A byte that writes to data register
-     *
-     *    @return       None
-     *
-     *    @details      When write a data to I2C_DAT register, the I2C controller will shift it to I2C bus.
-     *    \hideinitializer
-     */
+/**
+*    @brief        Write a Data to I2C Data Register
+*
+*    @param[in]    i2c         Specify I2C port
+*    @param[in]    u8Data      A byte that writes to data register
+*
+*    @return       None
+*
+*    @details      When write a data to I2C_DAT register, the I2C controller will shift it to I2C bus.
+*    \hideinitializer
+*/
 #define I2C_SET_DATA(i2c, u8Data) ((i2c)->DAT = (u8Data))
 
-     /**
-      *    @brief        Get I2C Bus status code
-      *
-      *    @param[in]    i2c        Specify I2C port
-      *
-      *    @return       I2C status code
-      *
-      *    @details      To get this status code to monitor I2C bus event.
-      *    \hideinitializer
-      */
+/**
+*    @brief        Get I2C Bus status code
+*
+*    @param[in]    i2c        Specify I2C port
+*
+*    @return       I2C status code
+*
+*    @details      To get this status code to monitor I2C bus event.
+*    \hideinitializer
+*/
 #define I2C_GET_STATUS(i2c) ((i2c)->STATUS0)
 
-      /**
-       *    @brief        Get Time-out flag from I2C Bus
-       *
-       *    @param[in]    i2c     Specify I2C port
-       *
-       *    @retval       0       I2C Bus time-out is not happened
-       *    @retval       1       I2C Bus time-out is happened
-       *
-       *    @details      When I2C bus occurs time-out event, the time-out flag will be set.
-       *    \hideinitializer
-       */
+	  /**
+	   *    @brief        Get Time-out flag from I2C Bus
+	   *
+	   *    @param[in]    i2c     Specify I2C port
+	   *
+	   *    @retval       0       I2C Bus time-out is not happened
+	   *    @retval       1       I2C Bus time-out is happened
+	   *
+	   *    @details      When I2C bus occurs time-out event, the time-out flag will be set.
+	   *    \hideinitializer
+	   */
 #define I2C_GET_TIMEOUT_FLAG(i2c)   ( ((i2c)->TOCTL & I2C_TOCTL_TOIF_Msk) == I2C_TOCTL_TOIF_Msk ? 1:0 )
 
-       /**
-        *    @brief        To get wake-up flag from I2C Bus
-        *
-        *    @param[in]    i2c     Specify I2C port
-        *
-        *    @retval       0       Chip is not woken-up from power-down mode
-        *    @retval       1       Chip is woken-up from power-down mode
-        *
-        *    @details      I2C bus occurs wake-up event, wake-up flag will be set.
-        *    \hideinitializer
-        */
+	   /**
+		*    @brief        To get wake-up flag from I2C Bus
+		*
+		*    @param[in]    i2c     Specify I2C port
+		*
+		*    @retval       0       Chip is not woken-up from power-down mode
+		*    @retval       1       Chip is woken-up from power-down mode
+		*
+		*    @details      I2C bus occurs wake-up event, wake-up flag will be set.
+		*    \hideinitializer
+		*/
 #define I2C_GET_WAKEUP_FLAG(i2c) ( ((i2c)->WKSTS & I2C_WKSTS_WKIF_Msk) == I2C_WKSTS_WKIF_Msk ? 1:0  )
 
-        /**
-         *    @brief        To clear wake-up flag
-         *
-         *    @param[in]    i2c     Specify I2C port
-         *
-         *    @return       None
-         *
-         *    @details      If wake-up flag is set, use this macro to clear it.
-         *    \hideinitializer
-         */
+		/**
+		 *    @brief        To clear wake-up flag
+		 *
+		 *    @param[in]    i2c     Specify I2C port
+		 *
+		 *    @return       None
+		 *
+		 *    @details      If wake-up flag is set, use this macro to clear it.
+		 *    \hideinitializer
+		 */
 #define I2C_CLEAR_WAKEUP_FLAG(i2c)  ((i2c)->WKSTS = I2C_WKSTS_WKIF_Msk)
 
-         /**
-           * @brief      Enable RX PDMA function.
-           * @param[in]  i2c The pointer of the specified I2C module.
-           * @return     None.
-           * @details    Set RXPDMAEN bit of I2C_CTL1 register to enable RX PDMA transfer function.
-           * \hideinitializer
-           */
+		 /**
+		   * @brief      Enable RX PDMA function.
+		   * @param[in]  i2c The pointer of the specified I2C module.
+		   * @return     None.
+		   * @details    Set RXPDMAEN bit of I2C_CTL1 register to enable RX PDMA transfer function.
+		   * \hideinitializer
+		   */
 #define I2C_ENABLE_RX_PDMA(i2c)   ((i2c)->CTL1 |= I2C_CTL1_RXPDMAEN_Msk)
 
-           /**
-             * @brief      Enable TX PDMA function.
-             * @param[in]  i2c The pointer of the specified I2C module.
-             * @return     None.
-             * @details    Set TXPDMAEN bit of I2C_CTL1 register to enable TX PDMA transfer function.
-             * \hideinitializer
-             */
+		   /**
+			 * @brief      Enable TX PDMA function.
+			 * @param[in]  i2c The pointer of the specified I2C module.
+			 * @return     None.
+			 * @details    Set TXPDMAEN bit of I2C_CTL1 register to enable TX PDMA transfer function.
+			 * \hideinitializer
+			 */
 #define I2C_ENABLE_TX_PDMA(i2c)   ((i2c)->CTL1 |= I2C_CTL1_TXPDMAEN_Msk)
 
-             /**
-               * @brief      Disable RX PDMA transfer.
-               * @param[in]  i2c The pointer of the specified I2C module.
-               * @return     None.
-               * @details    Clear RXPDMAEN bit of I2C_CTL1 register to disable RX PDMA transfer function.
-               * \hideinitializer
-               */
+			 /**
+			   * @brief      Disable RX PDMA transfer.
+			   * @param[in]  i2c The pointer of the specified I2C module.
+			   * @return     None.
+			   * @details    Clear RXPDMAEN bit of I2C_CTL1 register to disable RX PDMA transfer function.
+			   * \hideinitializer
+			   */
 #define I2C_DISABLE_RX_PDMA(i2c)   ((i2c)->CTL1 &= ~I2C_CTL1_RXPDMAEN_Msk)
 
-               /**
-                 * @brief      Disable TX PDMA transfer.
-                 * @param[in]  i2c The pointer of the specified I2C module.
-                 * @return     None.
-                 * @details    Clear TXPDMAEN bit of I2C_CTL1 register to disable TX PDMA transfer function.
-                 * \hideinitializer
-                 */
+			   /**
+				 * @brief      Disable TX PDMA transfer.
+				 * @param[in]  i2c The pointer of the specified I2C module.
+				 * @return     None.
+				 * @details    Clear TXPDMAEN bit of I2C_CTL1 register to disable TX PDMA transfer function.
+				 * \hideinitializer
+				 */
 #define I2C_DISABLE_TX_PDMA(i2c)   ((i2c)->CTL1 &= ~I2C_CTL1_TXPDMAEN_Msk)
 
-                 /**
-                   * @brief      Enable PDMA stretch function.
-                   * @param[in]  i2c The pointer of the specified I2C module.
-                   * @return     None.
-                   * @details    Enable this function is to stretch bus by hardware after PDMA transfer is done if SI is not cleared.
-                   * \hideinitializer
-                   */
+				 /**
+				   * @brief      Enable PDMA stretch function.
+				   * @param[in]  i2c The pointer of the specified I2C module.
+				   * @return     None.
+				   * @details    Enable this function is to stretch bus by hardware after PDMA transfer is done if SI is not cleared.
+				   * \hideinitializer
+				   */
 #define I2C_ENABLE_PDMA_STRETCH(i2c)   ((i2c)->CTL1 |= I2C_CTL1_PDMASTR_Msk)
 
-                   /**
-                     * @brief      Disable PDMA stretch function.
-                     * @param[in]  i2c The pointer of the specified I2C module.
-                     * @return     None.
-                     * @details    I2C will send STOP after PDMA transfers done automatically.
-                     * \hideinitializer
-                     */
+				   /**
+					 * @brief      Disable PDMA stretch function.
+					 * @param[in]  i2c The pointer of the specified I2C module.
+					 * @return     None.
+					 * @details    I2C will send STOP after PDMA transfers done automatically.
+					 * \hideinitializer
+					 */
 #define I2C_DISABLE_PDMA_STRETCH(i2c)   ((i2c)->CTL1 &= ~I2C_CTL1_PDMASTR_Msk)
 
-                     /**
-                       * @brief      Reset PDMA function.
-                       * @param[in]  i2c The pointer of the specified I2C module.
-                       * @return     None.
-                       * @details    I2C PDMA engine will be reset after this function is called.
-                       * \hideinitializer
-                       */
+					 /**
+					   * @brief      Reset PDMA function.
+					   * @param[in]  i2c The pointer of the specified I2C module.
+					   * @return     None.
+					   * @details    I2C PDMA engine will be reset after this function is called.
+					   * \hideinitializer
+					   */
 #define I2C_DISABLE_RST_PDMA(i2c)   ((i2c)->CTL1 |= I2C_CTL1_PDMARST_Msk)
+
+/* nuc980 i2c Status */
+// Master
+#define  M_START                 0x08  //Start
+#define  M_REPEAT_START          0x10  //Master Repeat Start
+#define  M_TRAN_ADDR_ACK         0x18  //Master Transmit Address ACK
+#define  M_TRAN_ADDR_NACK        0x20  //Master Transmit Address NACK
+#define  M_TRAN_DATA_ACK         0x28  //Master Transmit Data ACK
+#define  M_TRAN_DATA_NACK        0x30  //Master Transmit Data NACK
+#define  M_ARB_LOST              0x38  //Master Arbitration Los
+#define  M_RECE_ADDR_ACK         0x40  //Master Receive Address ACK
+#define  M_RECE_ADDR_NACK        0x48  //Master Receive Address NACK
+#define  M_RECE_DATA_ACK         0x50  //Master Receive Data ACK
+#define  M_RECE_DATA_NACK        0x58  //Master Receive Data NACK
+#define  BUS_ERROR               0x00  //Bus error
+
+// Slave
+#define  S_REPEAT_START_STOP     0xA0  //Slave Transmit Repeat Start or Stop
+#define  S_TRAN_ADDR_ACK         0xA8  //Slave Transmit Address ACK
+#define  S_TRAN_DATA_ACK         0xB8  //Slave Transmit Data ACK
+#define  S_TRAN_DATA_NACK        0xC0  //Slave Transmit Data NACK
+#define  S_TRAN_LAST_DATA_ACK    0xC8  //Slave Transmit Last Data ACK
+#define  S_RECE_ADDR_ACK         0x60  //Slave Receive Address ACK
+#define  S_RECE_ARB_LOST         0x68  //Slave Receive Arbitration Lost
+#define  S_RECE_DATA_ACK         0x80  //Slave Receive Data ACK
+#define  S_RECE_DATA_NACK        0x88  //Slave Receive Data NACK
+
+//GC Mode
+#define  GC_ADDR_ACK             0x70  //GC mode Address ACK
+#define  GC_ARB_LOST             0x78  //GC mode Arbitration Lost
+#define  GC_DATA_ACK             0x90  //GC mode Data ACK
+#define  GC_DATA_NACK            0x98  //GC mode Data NACK
+
+//Other
+#define  ADDR_TRAN_ARB_LOST      0xB0  //Address Transmit Arbitration Lost
+#define  BUS_RELEASED            0xF8  //Bus Released
 
 #endif /* NUC980_I2C_H */

@@ -44,7 +44,7 @@
 #include "hw/timer/nuc970_timer.h"
 #include "hw/timer/nuc970_timer2.h" // etimer
 #include "hw/net/nuc970_emc.h"
-#include "hw/i2c/nuc970_i2c.h"
+#include "hw/i2c/nuc980_i2c.h"
 #include "hw/arm/nuc980.h"
 #include "hw/sd/sd.h"
 #include "hw/sd/sdhci.h"
@@ -3582,14 +3582,14 @@ static void nuc970_init(MachineState* machine)
     sysbus_create_simple(TYPE_NUC970_MISC, MP_MISC_BASE, NULL);
 #endif
 
+    // need to add IRQ_GPB~GPG
+    dev = sysbus_create_simple(TYPE_NUC970_GPIO, GPIO_BA, qdev_get_gpio_in(aic, IRQ_GPA));
 
-    //dev = sysbus_create_simple(TYPE_NUC970_GPIO, GPIO_BA, qdev_get_gpio_in(aic, GPIO_IRQn));
-
-    i2c_dev = sysbus_create_simple(TYPE_NUC970_I2C, I2C0_BA, NULL);
+    i2c_dev = sysbus_create_simple(TYPE_NUC980_I2C, I2C0_BA, NULL);
     //i2c = (I2CBus*)qdev_get_child_bus(i2c_dev, "i2c");
 
     s = SYS_BUS_DEVICE(i2c_dev);
-    sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, /*I2C0_IRQn*/53));
+    sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, IRQ_I2C0));
 
     //nuc970_eeprom_init(i2c, 0x50, 32 * KiB);
 

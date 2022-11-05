@@ -12,6 +12,7 @@
 #include "qapi/error.h"
 #include "sysemu/blockdev.h"
 #include "hw/qdev-properties.h"
+#include "qemu/timer.h"
 
 #ifndef DEBUG_NUC980_I2C
 #define DEBUG_NUC980_I2C 1
@@ -24,6 +25,8 @@
                                              __func__, ##args); \
         } \
     } while (0)
+
+static int64_t i2c_transfer_time;
 
 static const char* nuc980_i2c_get_regname(unsigned offset)
 {
@@ -86,6 +89,46 @@ static inline void nuc980_i2c_raise_interrupt(NUC980I2CState* s)
     }
 }
 
+static void nuc980_i2c_transfer(void* opaque)
+{
+    NUC980I2CState* s = opaque;
+    DPRINTF("[TIMER] i2c_transfer %02x\n", s->DAT);
+
+    if (s->STATUS0 == 0x08 || s->STATUS0 == 0x10) {
+        int ret;
+        s->is_recv = extract32(s->DAT, 0, 1);
+        ret = i2c_start_transfer(s->bus, extract32(s->DAT, 1, 7), s->is_recv);
+        DPRINTF("start_transfer(...,0x%02x,%d) => %d\n", extract32(s->DAT, 1, 7), s->is_recv, ret);
+        if (ret) {
+            // if non zero is returned, the address is not valid
+            s->STATUS0 = s->is_recv ? 0x48 : 0x20;
+        }
+        else {
+            s->STATUS0 = s->is_recv ? 0x40 : 0x18;
+            if (s->is_recv) {
+                s->DAT = i2c_recv(s->bus);
+                s->STATUS0 = s->ack ? M_RECE_DATA_ACK : M_RECE_DATA_NACK;
+            }
+
+        }
+        DPRINTF("[DAT] STATUS0: %x\n", s->STATUS0);
+        nuc980_i2c_raise_interrupt(s);
+    }
+    else { // This is a normal data write
+        if (i2c_send(s->bus, s->DAT)) {
+            // if the target return non zero then end the transfer
+            s->STATUS0 = 0x30;
+            i2c_end_transfer(s->bus);
+        }
+        else {
+            s->STATUS0 = 0x28;
+        }
+        DPRINTF("[DAT] STATUS0: %x\n", s->STATUS0);
+        nuc980_i2c_raise_interrupt(s);
+    }
+
+}
+
 static uint64_t nuc980_i2c_read(void* opaque, hwaddr offset,
     unsigned size)
 {
@@ -118,7 +161,7 @@ static uint64_t nuc980_i2c_read(void* opaque, hwaddr offset,
         break;
     }
 
-    DPRINTF("read  %s [0x%" HWADDR_PRIx "] -> 0x%08x\n",
+    DPRINTF(" read  %s [0x%" HWADDR_PRIx "] -> 0x%08x\n",
         nuc980_i2c_get_regname(offset), offset, value);
 
     return (uint64_t)value;
@@ -135,86 +178,67 @@ static void nuc980_i2c_write(void* opaque, hwaddr offset,
     value &= 0xff;
 
     switch (offset) {
+    case I2C_ADDR0:
+        s->ADDR0 = value;
+        break;
+    case I2C_ADDR1:
+        s->ADDR1 = value;
+        break;
+    case I2C_ADDR2:
+        s->ADDR2 = value;
+        break;
+    case I2C_ADDR3:
+        s->ADDR3 = value;
+        break;
     case I2C_CLKDIV:
         s->CLKDIV = value;
         break;
 
     case I2C_CTL0:
-        if (!nuc980_i2c_is_enabled(s)) {
-            break;
-        }
+        
         s->CTL0 = value;
         if (value & I2C_CTL_SI) {
             s->CTL0 &= ~I2C_CTL_SI;
             qemu_irq_lower(s->irq);
         }
-        else if (value & I2C_CTL_SI_AA) {
+        if ((value & I2C_CTL_SI_AA) == I2C_CTL_SI_AA) {
             // enter SLV mode
         }
-        else if (value & I2C_CTL_STA) {
+        if ((value & I2C_CTL_STA) && (value & I2C_CTL_STO) && (value & I2C_CTL_SI)) {
             s->STATUS0 = 0x08;
+            DPRINTF("[CTL0] STATUS0: %x\n", s->STATUS0);
             nuc980_i2c_raise_interrupt(s);
         }
-/*
-        else if ((value & I2C_CMD_START) && 
-            (value & I2C_CMD_WRITE)) {
-            if (i2c_start_transfer(s->bus, extract32(s->DAT, 1, 7),
-                extract32(s->DAT, 0, 1))) {
-                // if non zero is returned, the address is not valid
-                //s->csr |= (1 << 11);
-            }
-            else {                
-                //s->csr &= ~(1 << 11);
-                nuc980_i2c_raise_interrupt(s);
-            }
-        }
-        else if (value & I2C_CMD_WRITE) { // This is a normal data write
-            if (i2c_send(s->bus, s->DAT)) {
-                // if the target return non zero then end the transfer
-                //s->csr |= (1<<11);
-                i2c_end_transfer(s->bus);
-            }
-            else {
-                //s->csr &= ~(1<<11);
-                nuc980_i2c_raise_interrupt(s);
-            }
-        }
-        else if (value & I2C_CMD_READ) {
-            s->DAT = i2c_recv(s->bus);
+        else if ((value & I2C_CTL_STA_SI) == I2C_CTL_STA_SI) {   // repeat start?
+            s->STATUS0 = 0x10;  
+            DPRINTF("[CTL0] STATUS0: %x\n", s->STATUS0);
             nuc980_i2c_raise_interrupt(s);
         }
-*/
+        else if ((value & I2C_CTL_STA) == I2C_CTL_STA) {
+            s->STATUS0 = 0x08;
+            DPRINTF("[CTL0] STATUS0: %x\n", s->STATUS0);
+            nuc980_i2c_raise_interrupt(s);
+        } 
+        if (value & I2C_CTL_STO) {
+            i2c_end_transfer(s->bus);
+            s->CTL0 &= ~I2C_CTL_STO;
+        }
+        if (value & I2C_CTL_AA) {
+            s->ack = value & I2C_CTL_AA ? 1 : 0;
+        }
         break;
 
     case I2C_DAT:
         /* if the device is not enabled, nothing to do */
-        if (!nuc980_i2c_is_enabled(s)) {
-            break;
-        }
+        //if (!nuc980_i2c_is_enabled(s)) {
+        //    break;
+        //}
         s->DAT = value;
-        if (s->STATUS0 == 0x08 || s->STATUS0 == 0x10) {
-            if (i2c_start_transfer(s->bus, extract32(s->DAT, 1, 7),
-                extract32(s->DAT, 0, 1))) {
-                // if non zero is returned, the address is not valid
-                s->STATUS0 = 0x20;
-            }
-            else {
-                s->STATUS0 = 0x18;
-                
-            }
-            nuc980_i2c_raise_interrupt(s);
-        }
-        else { // This is a normal data write
-            if (i2c_send(s->bus, s->DAT)) {
-                // if the target return non zero then end the transfer
-                s->STATUS0 = 0x30;
-                i2c_end_transfer(s->bus);
-            }
-            else {
-                s->STATUS0 = 0x28;                
-            }
-            nuc980_i2c_raise_interrupt(s);
-        }
+        /*
+            Delay transfer
+        */
+        s->dat_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        timer_mod(s->dat_timer, s->dat_time + i2c_transfer_time);
         break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "[%s]%s: Bad address at offset 0x%"
@@ -242,8 +266,8 @@ static const VMStateDescription nuc980_i2c_vmstate = {
         VMSTATE_UINT8(cmdr, NUC980I2CState),
         VMSTATE_UINT8(swr, NUC980I2CState),
         VMSTATE_UINT8(rxr, NUC980I2CState),
-        VMSTATE_UINT32(txr, NUC980I2CState),
         */
+        VMSTATE_UINT32(STATUS0, NUC980I2CState),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -260,7 +284,6 @@ static void nuc980_i2c_realize(DeviceState* dev, Error** errp)
 
     I2CSlave* i2c_dev = i2c_slave_new("at24c-eeprom", 0x50);
     
-
     DriveInfo* dinfo = drive_get_by_index(IF_NONE, 0);
     BlockBackend* blk = dinfo ? blk_by_legacy_dinfo(dinfo) : NULL;
     if (blk) {
@@ -270,6 +293,9 @@ static void nuc980_i2c_realize(DeviceState* dev, Error** errp)
 
     i2c_slave_realize_and_unref(i2c_dev, s->bus, &error_abort);
 
+    s->dat_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
+        nuc980_i2c_transfer, s);
+    i2c_transfer_time = NANOSECONDS_PER_SECOND / 1000;
 }
 
 static void nuc980_i2c_class_init(ObjectClass* klass, void* data)
