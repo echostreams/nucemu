@@ -315,6 +315,7 @@ struct NUC980I2CState {
 	uint32_t BUSTOUT;               /*!< [0x0064] I2C Bus Management Timer Register                                */
 	uint32_t CLKTOUT;               /*!< [0x0068] I2C Bus Management Clock Low Timer Register*/
 
+	bool is_slave;
 	bool is_recv;
 	bool ack;
 	QEMUTimer* dat_timer;

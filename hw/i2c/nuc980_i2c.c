@@ -109,12 +109,11 @@ static void nuc980_i2c_transfer(void* opaque)
                 s->DAT = i2c_recv(s->bus);
                 s->STATUS0 = s->ack ? M_RECE_DATA_ACK : M_RECE_DATA_NACK;
             }
-
         }
         DPRINTF("[DAT] STATUS0: %x\n", s->STATUS0);
         nuc980_i2c_raise_interrupt(s);
     }
-    else { // This is a normal data write
+    else if (!s->is_recv) { // This is a normal data write
         if (i2c_send(s->bus, s->DAT)) {
             // if the target return non zero then end the transfer
             s->STATUS0 = 0x30;
@@ -123,6 +122,12 @@ static void nuc980_i2c_transfer(void* opaque)
         else {
             s->STATUS0 = 0x28;
         }
+        DPRINTF("[DAT] STATUS0: %x\n", s->STATUS0);
+        nuc980_i2c_raise_interrupt(s);
+    }
+    else if (s->is_recv) {
+        s->DAT = i2c_recv(s->bus);
+        s->STATUS0 = s->ack ? M_RECE_DATA_ACK : M_RECE_DATA_NACK;
         DPRINTF("[DAT] STATUS0: %x\n", s->STATUS0);
         nuc980_i2c_raise_interrupt(s);
     }
@@ -144,6 +149,13 @@ static uint64_t nuc980_i2c_read(void* opaque, hwaddr offset,
         break;
     case I2C_DAT:
         value = s->DAT;
+        if (s->is_recv && s->ack) {
+            /*
+            Delay transfer
+            */
+            s->dat_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+            timer_mod(s->dat_timer, s->dat_time + i2c_transfer_time);
+        }
         break;
     case I2C_STATUS0:
         value = s->STATUS0;
@@ -203,6 +215,7 @@ static void nuc980_i2c_write(void* opaque, hwaddr offset,
         }
         if ((value & I2C_CTL_SI_AA) == I2C_CTL_SI_AA) {
             // enter SLV mode
+            s->is_slave = 1;
         }
         if ((value & I2C_CTL_STA) && (value & I2C_CTL_STO) && (value & I2C_CTL_SI)) {
             s->STATUS0 = 0x08;
@@ -218,7 +231,8 @@ static void nuc980_i2c_write(void* opaque, hwaddr offset,
             s->STATUS0 = 0x08;
             DPRINTF("[CTL0] STATUS0: %x\n", s->STATUS0);
             nuc980_i2c_raise_interrupt(s);
-        } 
+        }
+
         if (value & I2C_CTL_STO) {
             i2c_end_transfer(s->bus);
             s->CTL0 &= ~I2C_CTL_STO;
