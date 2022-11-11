@@ -3686,17 +3686,23 @@ static void nuc970_init(MachineState* machine)
     nuc970_uart_create(UART8_BA, 64, 8, serial_hd(8), qdev_get_gpio_in(aic, IRQ_UART8));
     //nuc970_uart_create(UARTA_BA, 64, 10, serial_hd(10), qdev_get_gpio_in(aic, IRQ_UART10));
 
-    /*** SPI ***/
-    dev = qdev_new("nuc970-spi");
+    /*** QSPI0 ***/
+    dev = qdev_new("nuc980-spi");
     qdev_prop_set_uint8(dev, "num-ss-bits", 2);
-
     s = SYS_BUS_DEVICE(dev);
+    sysbus_realize(s, &error_abort);
+    sysbus_mmio_map(s, 0, QSPI0_BA);
+    sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, IRQ_QSPI0));
 
+    /*** SPI0 ***/
+    dev = qdev_new("nuc980-spi");
+    qdev_prop_set_uint8(dev, "num-ss-bits", 2);
+    s = SYS_BUS_DEVICE(dev);
     sysbus_realize(s, &error_abort);
     sysbus_mmio_map(s, 0, SPI0_BA);
-
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(aic, IRQ_SPI0));
     
+
     sysbus_create_simple(TYPE_NUC970_WDT, WDT_BA, NULL);
     sysbus_create_simple("nuc970.rng", CRPT_BA, NULL);
     

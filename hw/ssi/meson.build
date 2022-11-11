@@ -12,3 +12,4 @@ softmmu_ss.add(when: 'CONFIG_IMX', if_true: files('imx_spi.c'))
 softmmu_ss.add(when: 'CONFIG_OMAP', if_true: files('omap_spi.c'))
 
 softmmu_ss.add(when: 'CONFIG_NUC970', if_true: files('nuc970_spi.c'))
+softmmu_ss.add(when: 'CONFIG_NUC980', if_true: files('nuc980_spi.c'))

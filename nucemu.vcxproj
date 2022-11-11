@@ -103,6 +103,7 @@
     <ClCompile Include="hw\misc\nuc970_rng.c" />
     <ClCompile Include="hw\net\nuc970_emc.c" />
     <ClCompile Include="hw\ssi\nuc970_spi.c" />
+    <ClCompile Include="hw\ssi\nuc980_spi.c" />
     <ClCompile Include="hw\timer\nuc970_timer.c" />
     <ClCompile Include="hw\timer\nuc970_timer2.c" />
     <ClCompile Include="hw\usb\nuc970-usbd.c" />

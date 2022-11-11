@@ -767,7 +767,7 @@ static void complete_collecting_data(Flash* s)
         break;
     case RDID_90:
     case RDID_AB:
-        if (get_man(s) == MAN_SST) {
+        if (get_man(s) == MAN_SST || get_man(s) == MAN_WINBOND) {
             if (s->cur_addr <= 1) {
                 if (s->cur_addr) {
                     s->data[0] = s->pi->id[2];
@@ -1433,7 +1433,7 @@ static int m25p80_cs(SSIPeripheral* ss, bool select)
 static uint32_t m25p80_transfer8(SSIPeripheral* ss, uint32_t tx)
 {
     Flash* s = M25P80(ss);
-    uint32_t r = 0;
+    uint32_t r = 0x80000000; // will be updated during STATE_READ or STATE_READING_DATA
 
     trace_m25p80_transfer(s, s->state, s->len, s->needed_bytes, s->pos,
         s->cur_addr, (uint8_t)tx);
