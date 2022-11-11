@@ -983,8 +983,11 @@ spi_read(void* opaque, hwaddr addr, unsigned int size)
         r = s->FIFOCTL;
         break;
     case 0x14:
-        r = 
-            (fifo32_is_empty(&s->rx_fifo) ? 1 : 0) << SPI_STATUS_RXEMPTY_Pos
+        r =   SPI_STATUS_SPIENSTS_Msk
+            | (fifo32_is_empty(&s->tx_fifo) ? 1 : 0) << SPI_STATUS_TXEMPTY_Pos
+            | (fifo32_is_empty(&s->rx_fifo) ? 1 : 0) << SPI_STATUS_RXEMPTY_Pos
+            | (fifo32_is_full(&s->tx_fifo) ? 1 : 0) << SPI_STATUS_TXFULL_Pos
+            | (fifo32_is_full(&s->rx_fifo) ? 1: 0) << SPI_STATUS_RXFULL_Pos
             ;
         break;
     case 0x30:
@@ -1099,14 +1102,15 @@ static void nuc980_spi_flush_txfifo(NUC980SPI* s)
 
         DPRINTF("data rx:0x%08x\n", rx);
 
-        //if (valid_bytes) {
+        if (valid_bytes) {
             if (fifo32_is_full(&s->rx_fifo)) {
                 //s->regs[ECSPI_STATREG] |= ECSPI_STATREG_RO;
             }
             else {
                 fifo32_push(&s->rx_fifo, rx);
             }
-        //}
+        }
+
         /*
         if (s->burst_length <= 0) {
             if (!imx_spi_is_multiple_master_burst(s)) {
@@ -1275,8 +1279,8 @@ static void nuc980_spi_realize(DeviceState* dev, Error** errp)
     fifo32_create(&s->tx_fifo, /*FIFO_CAPACITY*/8);
     fifo32_create(&s->rx_fifo, /*FIFO_CAPACITY*/8);
 
-    //nuc980_connect_flash(dev, 0, "w25q256", drive_get(IF_MTD, 0, 0));
-    nuc980_connect_flash(dev, 0, "w25q80", drive_get(IF_MTD, 0, 0));
+    nuc980_connect_flash(dev, 0, "w25q256", drive_get(IF_MTD, 0, 0));
+    //nuc980_connect_flash(dev, 0, "w25q80", drive_get(IF_MTD, 0, 0));
     
     //nuc980_connect_flash(dev, 0, "s25sl12801", drive_get(IF_MTD, 0, 0));
     //nuc980_connect_flash(dev, 0, "sst25vf032b", drive_get(IF_MTD, 0, 0));
